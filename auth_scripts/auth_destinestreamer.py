@@ -27,17 +27,13 @@ class Settings(BaseSettings):
     KEYCLOAK_URL: str = "https://auth.destine.eu/"
     KEYCLOAK_REALM: str = "desp"
 
-    KEYCLOAK_REDIRECT_URL: str = (
-        "https://streamer.destine.eu/api/v1/authentication/callback"
-    )
+    KEYCLOAK_REDIRECT_URL: str = "https://streamer.destine.eu/api/v1/authentication/callback"
     KEYCLOAK_CLIENTID: str = "streaming-fe"
 
     KEYCLOAK_USERNAME: str = username
     KEYCLOAK_PASSWORD: str = password
 
-    model_config = SettingsConfigDict(
-        env_file=os.path.join(PREFIX, ".env"), extra="allow"
-    )
+    model_config = SettingsConfigDict(env_file=os.path.join(PREFIX, ".env"), extra="allow")
 
 
 class Auth:
@@ -59,20 +55,14 @@ class Auth:
             session = requests.Session()
             # get auth_url - form action
             auth_url = (
-                html.fromstring(
-                    session.get(
-                        url=s.KEYCLOAK_AUTH, params=self.get_params
-                    ).content.decode()
-                )
+                html.fromstring(session.get(url=s.KEYCLOAK_AUTH, params=self.get_params).content.decode())
                 .forms[0]
                 .action
             )
             # get authorization code
             code = parse_qs(
                 urlparse(
-                    session.post(
-                        auth_url, data=self.post_data, allow_redirects=False
-                    ).headers["Location"]
+                    session.post(auth_url, data=self.post_data, allow_redirects=False).headers["Location"]
                 ).query
             )["code"][0]
             # get access token
@@ -86,9 +76,7 @@ class Auth:
             access_token = tokens["access_token"]
             refresh_token = tokens["refresh_token"]
 
-            decoded_access_token = jwt.decode(
-                access_token, self.getKey(access_token), algorithms=["RS256"]
-            )
+            decoded_access_token = jwt.decode(access_token, self.getKey(access_token), algorithms=["RS256"])
         except Exception:
             raise
             # raise RuntimeError("Token request Failed")
@@ -166,12 +154,7 @@ if __name__ == "__main__":
     s = parser.parse_args()
 
     openid_configuration = requests.get(
-        s.KEYCLOAK_URL
-        + "/"
-        + "realms"
-        + "/"
-        + s.KEYCLOAK_REALM
-        + "/.well-known/openid-configuration"
+        s.KEYCLOAK_URL + "/" + "realms" + "/" + s.KEYCLOAK_REALM + "/.well-known/openid-configuration"
     ).json()
     s.KEYCLOAK_JWKS_URL = openid_configuration["jwks_uri"]
     s.KEYCLOAK_AUTH = openid_configuration["authorization_endpoint"]

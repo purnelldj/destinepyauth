@@ -36,12 +36,16 @@ def connection_desp(username, password):
 
     session = requests.Session()
 
-    auth_url = html.fromstring(
-        session.get(
-            url=DESP_IAM_URL + "/auth",
-            params=get_params,
-        ).content.decode()
-    ).forms[0].action
+    auth_url = (
+        html.fromstring(
+            session.get(
+                url=DESP_IAM_URL + "/auth",
+                params=get_params,
+            ).content.decode()
+        )
+        .forms[0]
+        .action
+    )
 
     # print(f"auth url: {auth_url}")
 
@@ -49,11 +53,7 @@ def connection_desp(username, password):
     session_post = session.post(auth_url, data=post_data, allow_redirects=False)
 
     # get authorization code
-    code = parse_qs(
-        urlparse(
-            session_post.headers["Location"]
-        ).query
-    )["code"][0]
+    code = parse_qs(urlparse(session_post.headers["Location"]).query)["code"][0]
 
     # print(f"authorization code: {code}")
 
@@ -67,9 +67,7 @@ def connection_desp(username, password):
     }
 
     # get access token
-    tokens = session.post(
-        DESP_IAM_URL + "/token", data=post_data
-    ).json()
+    tokens = session.post(DESP_IAM_URL + "/token", data=post_data).json()
     access_token = tokens["access_token"]
     # print(f"access token: {access_token}")
 
@@ -85,10 +83,11 @@ def connection_desp(username, password):
     }
 
     response = requests.post(HIGHWAY_TOKEN_URL, data=data)
-    highway_token = json.loads(response.content)['access_token']
+    highway_token = json.loads(response.content)["access_token"]
 
     # print(f"HIGHWAY TOKEN: {highway_token}")
     return highway_token
+
 
 def direct_connection(username, password):
     """
@@ -98,16 +97,14 @@ def direct_connection(username, password):
     :param password: the password.
     :return: HIGHWAY authentication token.
     """
-    payload = 'grant_type=password&client_id='
+    payload = "grant_type=password&client_id="
     payload += HIGHWAY_CLIENT_ID
-    payload += '&username='
+    payload += "&username="
     payload += username
-    payload += '&password='
+    payload += "&password="
     payload += password
-    headers = {
-        'Content-Type': 'application/x-www-form-urlencoded'
-    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
     response = requests.request("POST", HIGHWAY_TOKEN_URL, headers=headers, data=payload)
 
-    return json.loads(response.content)['access_token']
+    return json.loads(response.content)["access_token"]

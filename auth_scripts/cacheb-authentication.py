@@ -62,13 +62,9 @@ else:
 print(f"Authenticating on {config.iam_url} with user {user}", file=sys.stderr)
 
 with requests.Session() as s:
-
     # Get the auth url
     response = s.get(
-        url=config.iam_url
-        + "/realms/"
-        + config.iam_realm
-        + "/protocol/openid-connect/auth",
+        url=config.iam_url + "/realms/" + config.iam_realm + "/protocol/openid-connect/auth",
         params={
             "client_id": config.iam_client,
             "redirect_uri": SERVICE_URL,
@@ -94,9 +90,7 @@ with requests.Session() as s:
         tree = html.fromstring(login.content)
         error_message_element = tree.xpath('//span[@id="input-error"]/text()')
         error_message = (
-            error_message_element[0].strip()
-            if error_message_element
-            else "Error message not found"
+            error_message_element[0].strip() if error_message_element else "Error message not found"
         )
         raise Exception(error_message)
 
@@ -107,10 +101,7 @@ with requests.Session() as s:
 
     # Use the auth code to get the token
     response = requests.post(
-        config.iam_url
-        + "/realms/"
-        + config.iam_realm
-        + "/protocol/openid-connect/token",
+        config.iam_url + "/realms/" + config.iam_realm + "/protocol/openid-connect/token",
         data={
             "client_id": config.iam_client,
             "redirect_uri": SERVICE_URL,
