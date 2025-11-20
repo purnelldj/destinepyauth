@@ -46,81 +46,81 @@ class Config(ConfigModel):
     ] = "edh-public"
 
 
-config = Conflator("despauth", Config).load()
+def main():
+    config = Conflator("despauth", Config).load()
 
-if config.user is None:
-    user = input("Username: ")
-else:
-    user = config.user
+    if config.user is None:
+        user = input("Username: ")
+    else:
+        user = config.user
 
-if config.password is None:
-    password = getpass.getpass("Password: ")
-else:
-    password = config.password
+    if config.password is None:
+        password = getpass.getpass("Password: ")
+    else:
+        password = config.password
 
+    print(f"Authenticating on {config.iam_url} with user {user}", file=sys.stderr)
 
-print(f"Authenticating on {config.iam_url} with user {user}", file=sys.stderr)
-
-with requests.Session() as s:
-    # Get the auth url
-    response = s.get(
-        url=config.iam_url + "/realms/" + config.iam_realm + "/protocol/openid-connect/auth",
-        params={
-            "client_id": config.iam_client,
-            "redirect_uri": SERVICE_URL,
-            "scope": "openid offline_access",
-            "response_type": "code",
-        },
-    )
-    response.raise_for_status()
-    auth_url = html.fromstring(response.content.decode()).forms[0].action
-
-    # Login and get auth code
-    login = s.post(
-        auth_url,
-        data={
-            "username": user,
-            "password": password,
-        },
-        allow_redirects=False,
-    )
-
-    # We expect a 302, a 200 means we got sent back to the login page and there's probably an error message
-    if login.status_code == 200:
-        tree = html.fromstring(login.content)
-        error_message_element = tree.xpath('//span[@id="input-error"]/text()')
-        error_message = (
-            error_message_element[0].strip() if error_message_element else "Error message not found"
+    with requests.Session() as s:
+        # Get the auth url
+        response = s.get(
+            url=config.iam_url + "/realms/" + config.iam_realm + "/protocol/openid-connect/auth",
+            params={
+                "client_id": config.iam_client,
+                "redirect_uri": SERVICE_URL,
+                "scope": "openid offline_access",
+                "response_type": "code",
+            },
         )
-        raise Exception(error_message)
+        response.raise_for_status()
+        auth_url = html.fromstring(response.content.decode()).forms[0].action
 
-    if login.status_code != 302:
-        raise Exception("Login failed")
+        # Login and get auth code
+        login = s.post(
+            auth_url,
+            data={
+                "username": user,
+                "password": password,
+            },
+            allow_redirects=False,
+        )
 
-    auth_code = parse_qs(urlparse(login.headers["Location"]).query)["code"][0]
+        # We expect a 302, a 200 means we got sent back to the login page and there's probably an error message
+        if login.status_code == 200:
+            tree = html.fromstring(login.content)
+            error_message_element = tree.xpath('//span[@id="input-error"]/text()')
+            error_message = (
+                error_message_element[0].strip() if error_message_element else "Error message not found"
+            )
+            raise Exception(error_message)
 
-    # Use the auth code to get the token
-    response = requests.post(
-        config.iam_url + "/realms/" + config.iam_realm + "/protocol/openid-connect/token",
-        data={
-            "client_id": config.iam_client,
-            "redirect_uri": SERVICE_URL,
-            "code": auth_code,
-            "grant_type": "authorization_code",
-            "scope": "",
-        },
-    )
+        if login.status_code != 302:
+            raise Exception("Login failed")
 
-    if response.status_code != 200:
-        raise Exception("Failed to get token")
+        auth_code = parse_qs(urlparse(login.headers["Location"]).query)["code"][0]
 
-    # instead of storing the access token, we store the offline_access (kind of "refresh") token
-    token = response.json()["refresh_token"]
+        # Use the auth code to get the token
+        response = requests.post(
+            config.iam_url + "/realms/" + config.iam_realm + "/protocol/openid-connect/token",
+            data={
+                "client_id": config.iam_client,
+                "redirect_uri": SERVICE_URL,
+                "code": auth_code,
+                "grant_type": "authorization_code",
+                "scope": "",
+            },
+        )
 
-    print(
-        f"""
-machine cacheb.dcms.destine.eu
-    login anonymous
-    password {token}
-"""
-    )
+        if response.status_code != 200:
+            raise Exception("Failed to get token")
+
+        # instead of storing the access token, we store the offline_access (kind of "refresh") token
+        token = response.json()["refresh_token"]
+
+        print(
+            f"""
+    machine cacheb.dcms.destine.eu
+        login anonymous
+        password {token}
+    """
+        )
