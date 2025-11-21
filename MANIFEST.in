@@ -1,5 +1,5 @@
 include README.md
 include LICENSE
 include CHANGELOG.md
-recursive-include gnssir *.pickle
+recursive-include destinepyauth *.pickle
 include ruff.toml
