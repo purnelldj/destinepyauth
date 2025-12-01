@@ -1,53 +1,49 @@
 #! /usr/bin/env python3
 
-from typing import Annotated
 from urllib.parse import parse_qs, urlparse
 import sys
 
+import argparse
 import requests
-from conflator import CLIArg, ConfigModel, Conflator, EnvVar
+from conflator import Conflator
 from lxml import html
-from pydantic import Field
 import getpass
 
-SERVICE_URL = "https://cacheb.dcms.destine.eu/"
+from destinepyauth.configs import (
+    BaseConfig,
+    CacheBConfig,
+    StreamerConfig,
+    InsulaConfig,
+    EdenConfig,
+    DEAConfig,
+    HighwayConfig,
+)
 
 
-class Config(ConfigModel):
-    user: Annotated[
-        str | None,
-        Field(description="Your DESP username"),
-        CLIArg("-u", "--user"),
-        EnvVar("USER"),
-    ] = None
-    password: Annotated[
-        str | None,
-        Field(description="Your DESP password"),
-        CLIArg("-p", "--password"),
-        EnvVar("PASSWORD"),
-    ] = None
-    iam_url: Annotated[
-        str,
-        Field(description="The URL of the IAM server"),
-        CLIArg("--iam-url"),
-        EnvVar("IAM_URL"),
-    ] = "https://auth.destine.eu"
-    iam_realm: Annotated[
-        str,
-        Field(description="The realm of the IAM server"),
-        CLIArg("--iam-realm"),
-        EnvVar("REALM"),
-    ] = "desp"
-    iam_client: Annotated[
-        str,
-        Field(description="The client ID of the IAM server"),
-        CLIArg("--iam-client"),
-        EnvVar("CLIENT_ID"),
-    ] = "edh-public"
-
-
-def main():
-    config = Conflator("despauth", Config).load()
+def main(
+    service: str,
+):
+    """
+    service can be: 'cacheb', 'streamer', 'insula', 'eden', 'dea', 'highway'
+    """
+    if service == "cacheb":
+        config: BaseConfig = Conflator("despauth", CacheBConfig).load()
+        scope = "openid offline_access"
+    elif service == "streamer":
+        config: BaseConfig = Conflator("despauth", StreamerConfig).load()
+        scope = "openid"
+    elif service == "insula":
+        config: BaseConfig = Conflator("despauth", InsulaConfig).load()
+        scope = "openid"
+    elif service == "eden":
+        config: BaseConfig = Conflator("despauth", EdenConfig).load()
+        scope = "openid"
+    elif service == "dea":
+        config: BaseConfig = Conflator("despauth", DEAConfig).load()
+        scope = "openid"
+    elif service == "highway":
+        config: BaseConfig = Conflator("despauth", HighwayConfig).load()
+        scope = "openid"
 
     if config.user is None:
         user = input("Username: ")
@@ -67,8 +63,8 @@ def main():
             url=config.iam_url + "/realms/" + config.iam_realm + "/protocol/openid-connect/auth",
             params={
                 "client_id": config.iam_client,
-                "redirect_uri": SERVICE_URL,
-                "scope": "openid offline_access",
+                "redirect_uri": config.iam_redirect_uri,
+                "scope": scope,
                 "response_type": "code",
             },
         )
@@ -104,7 +100,7 @@ def main():
             config.iam_url + "/realms/" + config.iam_realm + "/protocol/openid-connect/token",
             data={
                 "client_id": config.iam_client,
-                "redirect_uri": SERVICE_URL,
+                "redirect_uri": config.iam_redirect_uri,
                 "code": auth_code,
                 "grant_type": "authorization_code",
                 "scope": "",
@@ -117,10 +113,20 @@ def main():
         # instead of storing the access token, we store the offline_access (kind of "refresh") token
         token = response.json()["refresh_token"]
 
-        print(
-            f"""
-    machine cacheb.dcms.destine.eu
-        login anonymous
-        password {token}
-    """
-        )
+        print(f"\nlogin anonymous \npassword {token}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Get token from desp iam.")
+
+    parser.add_argument(
+        "--SERVICE",
+        "-s",
+        required=True,
+        type=str,
+        help="Service can be one of either 'streamer', or 'cacheb'",
+    )
+
+    s = parser.parse_args()
+
+    main(s.SERVICE)
