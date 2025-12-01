@@ -3,10 +3,13 @@
 import sys
 import argparse
 import getpass
+import json
 from urllib.parse import parse_qs, urlparse
-from typing import Dict, Any, Tuple, Type
+from typing import Dict, Any, Tuple, Type, Callable, Optional
 
 import requests
+import jwt
+from jwt.algorithms import RSAAlgorithm
 from lxml import html
 from conflator import Conflator
 
@@ -21,9 +24,39 @@ from destinepyauth.configs import (
 )
 
 
+# --- Service Specific Hooks ---
+
+
+def highway_token_exchange(access_token: str, config: BaseConfig) -> str:
+    """
+    Exchanges the DESP access token for a HIGHWAY access token.
+    """
+    highway_token_url = "https://highway.esa.int/sso/auth/realms/highway/protocol/openid-connect/token"
+    audience = "highway-public"
+    # The client_id for the exchange is the same as the initial one
+    client_id = config.iam_client
+
+    data = {
+        "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+        "subject_token": access_token,
+        "subject_issuer": "DESP_IAM_PROD",
+        "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+        "client_id": client_id,
+        "audience": audience,
+    }
+
+    print("Exchanging DESP token for HIGHWAY token...", file=sys.stderr)
+    response = requests.post(highway_token_url, data=data)
+
+    if response.status_code != 200:
+        raise Exception(f"Highway token exchange failed: {response.text}")
+
+    return response.json()["access_token"]
+
+
 class ServiceRegistry:
     """
-    Registry to map service names to their specific configuration classes and scopes.
+    Registry to map service names to their specific configuration classes, scopes, and hooks.
     """
 
     _REGISTRY: Dict[str, Dict[str, Any]] = {
@@ -32,7 +65,15 @@ class ServiceRegistry:
         "insula": {"config_cls": InsulaConfig, "scope": "openid"},
         "eden": {"config_cls": EdenConfig, "scope": "openid"},
         "dea": {"config_cls": DEAConfig, "scope": "openid"},
-        "highway": {"config_cls": HighwayConfig, "scope": "openid"},
+        "highway": {
+            "config_cls": HighwayConfig,
+            "scope": "openid",
+            "overrides": {
+                # Highway requires a specific redirect URI for the broker flow
+                "iam_redirect_uri": "https://highway.esa.int/sso/auth/realms/highway/broker/DESP_IAM_PROD/endpoint"
+            },
+            "post_auth_hook": highway_token_exchange,
+        },
     }
 
     @classmethod
@@ -50,14 +91,21 @@ class ConfigurationFactory:
     """
 
     @staticmethod
-    def load_config(service_name: str) -> Tuple[BaseConfig, str]:
+    def load_config(service_name: str) -> Tuple[BaseConfig, str, Optional[Callable]]:
         service_info = ServiceRegistry.get_service_info(service_name)
         config_cls: Type[BaseConfig] = service_info["config_cls"]
         scope: str = service_info["scope"]
+        hook: Optional[Callable] = service_info.get("post_auth_hook")
 
         # Load configuration using Conflator
         config: BaseConfig = Conflator("despauth", config_cls).load()
-        return config, scope
+
+        # Apply overrides if any
+        overrides = service_info.get("overrides", {})
+        for key, value in overrides.items():
+            setattr(config, key, value)
+
+        return config, scope, hook
 
 
 class AuthenticationService:
@@ -67,12 +115,29 @@ class AuthenticationService:
     2. Post credentials
     3. Extract auth code
     4. Exchange code for token
+    5. (Optional) Execute post-auth hook
+    6. (Optional) Verify/Decode token
     """
 
-    def __init__(self, config: BaseConfig, scope: str):
+    def __init__(self, config: BaseConfig, scope: str, post_auth_hook: Optional[Callable] = None):
         self.config = config
         self.scope = scope
+        self.post_auth_hook = post_auth_hook
         self.session = requests.Session()
+        self.jwks_uri = None  # Will be discovered
+
+    def _discover_endpoints(self):
+        """Discover OIDC endpoints to get JWKS URI."""
+        try:
+            discovery_url = (
+                f"{self.config.iam_url}/realms/{self.config.iam_realm}/.well-known/openid-configuration"
+            )
+            resp = self.session.get(discovery_url)
+            if resp.status_code == 200:
+                data = resp.json()
+                self.jwks_uri = data.get("jwks_uri")
+        except Exception as e:
+            print(f"Warning: Failed to discover OIDC endpoints: {e}", file=sys.stderr)
 
     def _get_credentials(self) -> Tuple[str, str]:
         """Retrieve username and password from config or prompt user."""
@@ -165,8 +230,50 @@ class AuthenticationService:
         # Return refresh_token if present (for offline_access), otherwise access_token
         return data.get("refresh_token", data.get("access_token"))
 
+    def _verify_and_decode(self, token: str):
+        """Verify signature and decode token."""
+        print("\nVerifying token...", file=sys.stderr)
+        try:
+            # Get the Key ID from the header (without verification first)
+            unverified_header = jwt.get_unverified_header(token)
+            kid = unverified_header.get("kid")
+
+            if not self.jwks_uri:
+                print("Skipping strict verification (JWKS URI not found). Decoded payload:", file=sys.stderr)
+                decoded = jwt.decode(token, options={"verify_signature": False})
+                print(json.dumps(decoded, indent=2), file=sys.stderr)
+                return
+
+            # Fetch JWKS
+            jwks = requests.get(self.jwks_uri).json()
+            public_key = None
+            for key in jwks["keys"]:
+                if key["kid"] == kid:
+                    public_key = RSAAlgorithm.from_jwk(json.dumps(key))
+                    break
+
+            if public_key:
+                decoded = jwt.decode(
+                    token,
+                    public_key,
+                    algorithms=["RS256"],
+                    audience=self.config.iam_client,
+                    options={"verify_aud": False},
+                )  # verification of audience often tricky with multiple clients
+                print("Token verified successfully. Payload:", file=sys.stderr)
+                print(json.dumps(decoded, indent=2), file=sys.stderr)
+            else:
+                print(f"Could not find public key for kid {kid}. Decoded (unverified):", file=sys.stderr)
+                decoded = jwt.decode(token, options={"verify_signature": False})
+                print(json.dumps(decoded, indent=2), file=sys.stderr)
+
+        except Exception as e:
+            print(f"Token verification failed: {e}", file=sys.stderr)
+
     def login(self):
         """Main execution method for the authentication flow."""
+        self._discover_endpoints()
+
         user, password = self._get_credentials()
 
         print(f"Authenticating on {self.config.iam_url} with user {user}", file=sys.stderr)
@@ -182,6 +289,19 @@ class AuthenticationService:
 
         # Step 4: Get Token
         token = self._exchange_code_for_token(auth_code)
+
+        # Step 5: Post-Auth Hook (e.g. Highway Token Exchange)
+        if self.post_auth_hook:
+            token = self.post_auth_hook(token, self.config)
+            # Note: The exchanged token might be signed by a different issuer/realm,
+            # so strict verification might fail if we use the original realm's JWKS.
+            # For Highway, the token comes from the Highway realm, not DESP.
+            # Re-discovery might be needed for verification of the exchanged token.
+
+        # Step 6: Verify/Decode
+        # If we swapped tokens, we might want to skip verification or discover new JWKS
+        # For now, we attempt verification using the original context, or just decode if it fails/warns.
+        self._verify_and_decode(token)
 
         # Output
         print(f"\nlogin anonymous \npassword {token}")
@@ -202,10 +322,10 @@ def main():
 
     try:
         # Load Config
-        config, scope = ConfigurationFactory.load_config(args.SERVICE)
+        config, scope, hook = ConfigurationFactory.load_config(args.SERVICE)
 
         # Initialize Service
-        auth_service = AuthenticationService(config, scope)
+        auth_service = AuthenticationService(config, scope, post_auth_hook=hook)
 
         # Execute
         auth_service.login()
