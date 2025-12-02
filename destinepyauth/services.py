@@ -1,5 +1,11 @@
+"""
+Service registry and configuration factory for destinepyauth.
+"""
+
 from typing import Dict, Any, Tuple, Type, Callable, Optional
+
 from conflator import Conflator
+
 from destinepyauth.configs import (
     BaseConfig,
     CacheBConfig,
@@ -14,7 +20,13 @@ from destinepyauth.hooks import highway_token_exchange
 
 class ServiceRegistry:
     """
-    Registry to map service names to their specific configuration classes, scopes, and hooks.
+    Registry mapping service names to their configuration classes, scopes, and hooks.
+
+    Provides a centralized lookup for service-specific settings including:
+    - Configuration class for loading credentials and endpoints
+    - OAuth scope requirements
+    - Post-authentication hooks (e.g., token exchange)
+    - Configuration overrides
     """
 
     _REGISTRY: Dict[str, Dict[str, Any]] = {
@@ -27,7 +39,6 @@ class ServiceRegistry:
             "config_cls": HighwayConfig,
             "scope": "openid",
             "overrides": {
-                # Highway requires a specific redirect URI for the broker flow
                 "iam_redirect_uri": "https://highway.esa.int/sso/auth/realms/highway/broker/DESP_IAM_PROD/endpoint"
             },
             "post_auth_hook": highway_token_exchange,
@@ -36,30 +47,64 @@ class ServiceRegistry:
 
     @classmethod
     def get_service_info(cls, service_name: str) -> Dict[str, Any]:
+        """
+        Get configuration info for a service.
+
+        Args:
+            service_name: Name of the service (e.g., 'eden', 'highway').
+
+        Returns:
+            Dictionary containing config_cls, scope, and optional overrides/hooks.
+
+        Raises:
+            ValueError: If the service name is not registered.
+        """
         if service_name not in cls._REGISTRY:
-            raise ValueError(
-                f"Unknown service: {service_name}. " f"Available services: {', '.join(cls._REGISTRY.keys())}"
-            )
+            available = ", ".join(cls._REGISTRY.keys())
+            raise ValueError(f"Unknown service: {service_name}. Available: {available}")
         return cls._REGISTRY[service_name]
+
+    @classmethod
+    def list_services(cls) -> list[str]:
+        """
+        List all available service names.
+
+        Returns:
+            List of registered service names.
+        """
+        return list(cls._REGISTRY.keys())
 
 
 class ConfigurationFactory:
-    """
-    Factory to load the appropriate configuration object using Conflator.
-    """
+    """Factory for loading service configurations using Conflator."""
 
     @staticmethod
-    def load_config(service_name: str) -> Tuple[BaseConfig, str, Optional[Callable]]:
+    def load_config(service_name: str) -> Tuple[BaseConfig, str, Optional[Callable[[str, BaseConfig], str]]]:
+        """
+        Load configuration for a service.
+
+        Uses Conflator to load configuration from environment variables,
+        config files, and CLI arguments, then applies any service-specific overrides.
+
+        Args:
+            service_name: Name of the service to configure.
+
+        Returns:
+            Tuple of (config, scope, post_auth_hook) where:
+            - config: Loaded BaseConfig instance
+            - scope: OAuth scope string
+            - post_auth_hook: Optional callable for post-auth processing
+        """
         service_info = ServiceRegistry.get_service_info(service_name)
         config_cls: Type[BaseConfig] = service_info["config_cls"]
         scope: str = service_info["scope"]
-        hook: Optional[Callable] = service_info.get("post_auth_hook")
+        hook: Optional[Callable[[str, BaseConfig], str]] = service_info.get("post_auth_hook")
 
         # Load configuration using Conflator
         config: BaseConfig = Conflator("despauth", config_cls).load()
 
         # Apply overrides if any
-        overrides = service_info.get("overrides", {})
+        overrides: Dict[str, Any] = service_info.get("overrides", {})
         for key, value in overrides.items():
             setattr(config, key, value)
 

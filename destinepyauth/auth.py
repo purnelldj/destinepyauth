@@ -1,22 +1,44 @@
-#! /usr/bin/env python3
+#!/usr/bin/env python3
+"""
+Command-line interface for DESP authentication.
+
+Usage:
+    auth --SERVICE <service_name> [--output <format>] [--verbose]
+
+Examples:
+    auth --SERVICE eden                    # Get Eden token (legacy format)
+    auth --SERVICE highway --output token  # Get Highway token (just token)
+    auth --SERVICE cacheb --output json    # Get CacheB token (full JSON)
+"""
 
 import sys
 import argparse
 import logging
-
-from destinepyauth.services import ConfigurationFactory
+from destinepyauth.services import ConfigurationFactory, ServiceRegistry
 from destinepyauth.authentication import AuthenticationService
+from destinepyauth.exceptions import AuthenticationError
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Get token from desp iam.")
+def main() -> None:
+    """
+    Main entry point for the authentication CLI.
+
+    Parses command-line arguments, loads service configuration,
+    and executes the authentication flow.
+    """
+    parser = argparse.ArgumentParser(
+        description="Get authentication token from DESP IAM.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=f"Available services: {', '.join(ServiceRegistry.list_services())}",
+    )
 
     parser.add_argument(
         "--SERVICE",
         "-s",
         required=True,
         type=str,
-        help="Service name (e.g. 'streamer', 'cacheb', 'highway', etc.)",
+        choices=ServiceRegistry.list_services(),
+        help="Service name to authenticate against",
     )
 
     parser.add_argument(
@@ -32,7 +54,7 @@ def main():
         type=str,
         choices=["json", "token", "legacy"],
         default="legacy",
-        help="Output format: 'json' (full JSON with decoded token), 'token' (just the token string), 'legacy' (login/password format for git credentials)",
+        help="Output format: 'json' (full JSON), 'token' (just token), 'legacy' (git credential format)",
     )
 
     args = parser.parse_args()
@@ -46,17 +68,26 @@ def main():
     )
 
     try:
-        # Load Config
+        # Load configuration
         config, scope, hook = ConfigurationFactory.load_config(args.SERVICE)
 
-        # Initialize Service
-        auth_service = AuthenticationService(config, scope, post_auth_hook=hook, output_format=args.output)
-
-        # Execute
+        # Initialize and execute authentication
+        auth_service = AuthenticationService(
+            config=config,
+            scope=scope,
+            post_auth_hook=hook,
+            output_format=args.output,
+        )
         auth_service.login()
 
+    except AuthenticationError as e:
+        logging.error(str(e))
+        sys.exit(1)
+    except KeyboardInterrupt:
+        logging.error("Authentication cancelled")
+        sys.exit(130)
     except Exception as e:
-        logging.error(f"Error: {e}")
+        logging.error(f"Unexpected error: {e}")
         sys.exit(1)
 
 

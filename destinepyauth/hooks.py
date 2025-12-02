@@ -1,29 +1,54 @@
+"""
+Service-specific hooks for token exchange and post-authentication processing.
+"""
+
 import logging
+from typing import Dict, Any
+
 import requests
+
 from destinepyauth.configs import BaseConfig
 from destinepyauth.exceptions import handle_http_errors, AuthenticationError
 
 logger = logging.getLogger(__name__)
 
+# Highway service constants
+HIGHWAY_TOKEN_URL = "https://highway.esa.int/sso/auth/realms/highway/protocol/openid-connect/token"
+HIGHWAY_AUDIENCE = "highway-public"
+HIGHWAY_ISSUER = "DESP_IAM_PROD"
+
 
 @handle_http_errors("Highway token exchange failed")
 def highway_token_exchange(access_token: str, config: BaseConfig) -> str:
-    """Exchanges the DESP access token for a HIGHWAY access token."""
-    highway_token_url = "https://highway.esa.int/sso/auth/realms/highway/protocol/openid-connect/token"
+    """
+    Exchange a DESP access token for a HIGHWAY access token.
 
-    data = {
+    Performs OAuth2 token exchange with the Highway identity provider,
+    converting a DESP-issued token to one valid for Highway services.
+
+    Args:
+        access_token: The DESP access token to exchange.
+        config: Configuration containing client credentials.
+
+    Returns:
+        The Highway access token string.
+
+    Raises:
+        AuthenticationError: If the token exchange fails.
+    """
+    data: Dict[str, Any] = {
         "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
         "subject_token": access_token,
-        "subject_issuer": "DESP_IAM_PROD",
+        "subject_issuer": HIGHWAY_ISSUER,
         "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
         "client_id": config.iam_client,
-        "audience": "highway-public",
+        "audience": HIGHWAY_AUDIENCE,
     }
 
     logger.info("Exchanging DESP token for HIGHWAY token...")
     logger.debug(f"Client ID: {config.iam_client}")
 
-    response = requests.post(highway_token_url, data=data, timeout=10)
+    response = requests.post(HIGHWAY_TOKEN_URL, data=data, timeout=10)
 
     if response.status_code != 200:
         try:
@@ -33,7 +58,7 @@ def highway_token_exchange(access_token: str, config: BaseConfig) -> str:
             error_msg = response.text[:100]
         raise AuthenticationError(f"Exchange failed: {error_msg}")
 
-    result = response.json()
+    result: Dict[str, Any] = response.json()
     highway_token = result.get("access_token")
 
     if not highway_token:
