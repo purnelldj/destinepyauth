@@ -26,6 +26,15 @@ def main():
         help="Enable verbose (DEBUG) logging",
     )
 
+    parser.add_argument(
+        "--output",
+        "-o",
+        type=str,
+        choices=["json", "token", "legacy"],
+        default="legacy",
+        help="Output format: 'json' (full JSON with decoded token), 'token' (just the token string), 'legacy' (login/password format for git credentials)",
+    )
+
     args = parser.parse_args()
 
     # Configure logging
@@ -41,7 +50,7 @@ def main():
         config, scope, hook = ConfigurationFactory.load_config(args.SERVICE)
 
         # Initialize Service
-        auth_service = AuthenticationService(config, scope, post_auth_hook=hook)
+        auth_service = AuthenticationService(config, scope, post_auth_hook=hook, output_format=args.output)
 
         # Execute
         auth_service.login()

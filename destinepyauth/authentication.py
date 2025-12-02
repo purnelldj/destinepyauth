@@ -1,4 +1,3 @@
-import sys
 import getpass
 import json
 import logging
@@ -25,12 +24,20 @@ class AuthenticationService:
     6. (Optional) Verify/Decode token
     """
 
-    def __init__(self, config: BaseConfig, scope: str, post_auth_hook: Optional[Callable] = None):
+    def __init__(
+        self,
+        config: BaseConfig,
+        scope: str,
+        post_auth_hook: Optional[Callable] = None,
+        output_format: str = "legacy",
+    ):
         self.config = config
         self.scope = scope
         self.post_auth_hook = post_auth_hook
+        self.output_format = output_format
         self.session = requests.Session()
         self.jwks_uri = None  # Will be discovered
+        self.decoded_token = None  # Store decoded token for output
 
         # Log configuration
         logger.debug("Configuration loaded:")
@@ -183,8 +190,7 @@ class AuthenticationService:
 
             if not target_jwks_uri:
                 logger.warning("Skipping strict verification (JWKS URI not found)")
-                logger.info("Decoded (unverified) payload:")
-                print(json.dumps(unverified_payload, indent=2), file=sys.stderr)
+                self.decoded_token = unverified_payload
                 return
 
             # 3. Fetch JWKS and build public_keys dict (exactly like auth_eden.py)
@@ -200,8 +206,7 @@ class AuthenticationService:
 
             if kid not in public_keys:
                 logger.error(f"Could not find public key for kid {kid}. Available keys: {found_kids}")
-                logger.info("Decoded (unverified) payload:")
-                print(json.dumps(unverified_payload, indent=2), file=sys.stderr)
+                self.decoded_token = unverified_payload
                 return
 
             # 4. Decode and Verify (exactly like auth_eden.py)
@@ -214,6 +219,7 @@ class AuthenticationService:
             logger.info("Token verified successfully")
             logger.debug("Token payload:")
             logger.debug(json.dumps(decoded, indent=2))
+            self.decoded_token = decoded
 
         except Exception as e:
             logger.error(f"Token verification failed: {e}")
@@ -221,10 +227,29 @@ class AuthenticationService:
             # Fallback decode
             try:
                 decoded = jwt.decode(token, options={"verify_signature": False})
-                logger.info("Decoded (unverified) payload:")
-                print(json.dumps(decoded, indent=2), file=sys.stderr)
+                self.decoded_token = decoded
             except Exception:
                 pass
+
+    def _output_token(self, token: str):
+        """Output the token in the requested format."""
+        if self.output_format == "json":
+            # Output full token response as JSON
+            output = {"access_token": token, "token_type": "Bearer"}
+            if self.decoded_token:
+                output["decoded"] = self.decoded_token
+            print(json.dumps(output, indent=2))
+
+        elif self.output_format == "token":
+            # Output just the token (useful for export TOKEN=$(...)
+            print(token)
+
+        elif self.output_format == "legacy":
+            # Output in the legacy format (for git credential helpers, etc.)
+            print(f"login anonymous \npassword {token}")
+
+        else:
+            raise ValueError(f"Unknown output format: {self.output_format}")
 
     def login(self):
         """Main execution method for the authentication flow."""
@@ -253,5 +278,5 @@ class AuthenticationService:
         # Step 6: Verify/Decode
         self._verify_and_decode(token)
 
-        # Output
-        print(f"\nlogin anonymous \npassword {token}")
+        # Step 7: Output
+        self._output_token(token)
