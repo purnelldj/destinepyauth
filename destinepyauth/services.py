@@ -1,45 +1,70 @@
 """
 Service registry and configuration factory for destinepyauth.
+
+This module centralizes all service-specific configuration including:
+- OAuth client IDs and redirect URIs
+- Scope requirements
+- Post-authentication hooks (e.g., token exchange)
 """
 
-from typing import Dict, Any, Tuple, Type, Callable, Optional
+from typing import Dict, Any, Tuple, Callable, Optional
 
 from conflator import Conflator
 
-from destinepyauth.configs import (
-    BaseConfig,
-    CacheBConfig,
-    StreamerConfig,
-    InsulaConfig,
-    EdenConfig,
-    DEAConfig,
-    HighwayConfig,
-)
+from destinepyauth.configs import BaseConfig
 from destinepyauth.hooks import highway_token_exchange
 
 
 class ServiceRegistry:
     """
-    Registry mapping service names to their configuration classes, scopes, and hooks.
+    Registry mapping service names to their configuration defaults, scopes, and hooks.
 
-    Provides a centralized lookup for service-specific settings including:
-    - Configuration class for loading credentials and endpoints
-    - OAuth scope requirements
-    - Post-authentication hooks (e.g., token exchange)
-    - Configuration overrides
+    All service-specific settings are defined here in one place, making it easy
+    to add new services or modify existing ones.
     """
 
     _REGISTRY: Dict[str, Dict[str, Any]] = {
-        "cacheb": {"config_cls": CacheBConfig, "scope": "openid offline_access"},
-        "streamer": {"config_cls": StreamerConfig, "scope": "openid"},
-        "insula": {"config_cls": InsulaConfig, "scope": "openid"},
-        "eden": {"config_cls": EdenConfig, "scope": "openid"},
-        "dea": {"config_cls": DEAConfig, "scope": "openid"},
-        "highway": {
-            "config_cls": HighwayConfig,
+        "cacheb": {
+            "scope": "openid offline_access",
+            "defaults": {
+                "iam_client": "edh-public",
+                "iam_redirect_uri": "https://cacheb.dcms.destine.eu/",
+            },
+        },
+        "streamer": {
             "scope": "openid",
-            "overrides": {
-                "iam_redirect_uri": "https://highway.esa.int/sso/auth/realms/highway/broker/DESP_IAM_PROD/endpoint"
+            "defaults": {
+                "iam_client": "streaming-fe",
+                "iam_redirect_uri": "https://streamer.destine.eu/",
+            },
+        },
+        "insula": {
+            "scope": "openid",
+            "defaults": {
+                "iam_client": "insula-public",
+                "iam_redirect_uri": "https://insula.destine.eu/",
+            },
+        },
+        "eden": {
+            "scope": "openid",
+            "defaults": {
+                "iam_client": "hda-broker-public",
+                "iam_redirect_uri": "https://broker.eden.destine.eu/",
+            },
+        },
+        "dea": {
+            "scope": "openid",
+            "defaults": {
+                "iam_client": "dea_client",
+                "iam_redirect_uri": "https://dea.destine.eu/",
+            },
+        },
+        "highway": {
+            "scope": "openid",
+            "defaults": {
+                "iam_client": "highway-public",
+                # Highway uses a special redirect URI for DESP broker
+                "iam_redirect_uri": "https://highway.esa.int/sso/auth/realms/highway/broker/DESP_IAM_PROD/endpoint",
             },
             "post_auth_hook": highway_token_exchange,
         },
@@ -54,7 +79,7 @@ class ServiceRegistry:
             service_name: Name of the service (e.g., 'eden', 'highway').
 
         Returns:
-            Dictionary containing config_cls, scope, and optional overrides/hooks.
+            Dictionary containing scope, defaults, and optional hooks.
 
         Raises:
             ValueError: If the service name is not registered.
@@ -84,28 +109,30 @@ class ConfigurationFactory:
         Load configuration for a service.
 
         Uses Conflator to load configuration from environment variables,
-        config files, and CLI arguments, then applies any service-specific overrides.
+        config files, and CLI arguments. Service-specific defaults are applied
+        for any values not explicitly set by the user.
 
         Args:
             service_name: Name of the service to configure.
 
         Returns:
             Tuple of (config, scope, post_auth_hook) where:
-            - config: Loaded BaseConfig instance
+            - config: Loaded BaseConfig instance with service defaults applied
             - scope: OAuth scope string
             - post_auth_hook: Optional callable for post-auth processing
         """
         service_info = ServiceRegistry.get_service_info(service_name)
-        config_cls: Type[BaseConfig] = service_info["config_cls"]
         scope: str = service_info["scope"]
+        defaults: Dict[str, Any] = service_info.get("defaults", {})
         hook: Optional[Callable[[str, BaseConfig], str]] = service_info.get("post_auth_hook")
 
         # Load configuration using Conflator
-        config: BaseConfig = Conflator("despauth", config_cls).load()
+        config: BaseConfig = Conflator("despauth", BaseConfig).load()
 
-        # Apply overrides if any
-        overrides: Dict[str, Any] = service_info.get("overrides", {})
-        for key, value in overrides.items():
-            setattr(config, key, value)
+        # Apply service defaults for any values not explicitly set
+        for key, default_value in defaults.items():
+            current_value = getattr(config, key, None)
+            if current_value is None:
+                setattr(config, key, default_value)
 
         return config, scope, hook
