@@ -5,8 +5,11 @@ Main authentication service for DESP OAuth2 authentication flows.
 import getpass
 import json
 import logging
+import stat
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from typing import Tuple, Optional, Callable, Dict, Any
+from dataclasses import dataclass
 
 import requests
 import jwt
@@ -20,6 +23,20 @@ from destinepyauth.exceptions import handle_http_errors, AuthenticationError
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class TokenResult:
+    """Result of an authentication operation."""
+
+    access_token: str
+    """The access token string."""
+
+    decoded: Optional[Dict[str, Any]] = None
+    """Decoded token payload (if verification succeeded)."""
+
+    def __str__(self) -> str:
+        return self.access_token
+
+
 class AuthenticationService:
     """
     Service for handling DESP OAuth2 authentication flows.
@@ -30,12 +47,13 @@ class AuthenticationService:
     - Authorization code exchange
     - Token verification and decoding
     - Post-authentication hooks (e.g., token exchange)
+    - Optional .netrc file management
 
     Attributes:
         config: Service configuration containing IAM endpoints and credentials.
         scope: OAuth2 scope string for the authorization request.
         post_auth_hook: Optional callback for post-authentication processing.
-        output_format: Output format ('json', 'token', or 'legacy').
+        netrc_host: Optional hostname for .netrc entry (extracted from redirect_uri if not provided).
     """
 
     def __init__(
@@ -43,7 +61,7 @@ class AuthenticationService:
         config: BaseConfig,
         scope: str,
         post_auth_hook: Optional[Callable[[str, BaseConfig], str]] = None,
-        output_format: str = "legacy",
+        netrc_host: Optional[str] = None,
     ) -> None:
         """
         Initialize the authentication service.
@@ -52,15 +70,22 @@ class AuthenticationService:
             config: Configuration containing IAM URL, realm, client, and credentials.
             scope: OAuth2 scope string (e.g., 'openid', 'openid offline_access').
             post_auth_hook: Optional callable for post-auth token processing.
-            output_format: Output format - 'json', 'token', or 'legacy'.
+            netrc_host: Hostname for .netrc entry. If None, extracted from redirect_uri.
         """
         self.config = config
         self.scope = scope
         self.post_auth_hook = post_auth_hook
-        self.output_format = output_format
         self.session = requests.Session()
         self.jwks_uri: Optional[str] = None
         self.decoded_token: Optional[Dict[str, Any]] = None
+
+        # Extract netrc host from redirect_uri if not provided
+        if netrc_host:
+            self.netrc_host = netrc_host
+        elif config.iam_redirect_uri:
+            self.netrc_host = urlparse(config.iam_redirect_uri).netloc
+        else:
+            self.netrc_host = None
 
         logger.debug("Configuration loaded:")
         logger.debug(f"  IAM URL: {self.config.iam_url}")
@@ -68,6 +93,7 @@ class AuthenticationService:
         logger.debug(f"  IAM Client: {self.config.iam_client}")
         logger.debug(f"  Redirect URI: {self.config.iam_redirect_uri}")
         logger.debug(f"  Scope: {self.scope}")
+        logger.debug(f"  Netrc Host: {self.netrc_host}")
 
     @handle_http_errors("Failed to discover OIDC endpoints")
     def _discover_endpoints(self) -> None:
@@ -246,6 +272,69 @@ class AuthenticationService:
 
         return access_token
 
+    def _write_netrc(self, token: str, netrc_path: Optional[Path] = None) -> None:
+        """
+        Write or update credentials in .netrc file.
+
+        Creates the file if it doesn't exist. Updates existing entry for the
+        same host, or appends a new entry if not found.
+
+        Args:
+            token: The access token to store as password.
+            netrc_path: Path to .netrc file. Defaults to ~/.netrc.
+
+        Raises:
+            AuthenticationError: If netrc_host is not configured.
+        """
+        if not self.netrc_host:
+            raise AuthenticationError("Cannot write to .netrc: no host configured")
+
+        netrc_path = netrc_path or Path.home() / ".netrc"
+
+        # Read existing content
+        existing_lines: list[str] = []
+        if netrc_path.exists():
+            existing_lines = netrc_path.read_text().splitlines()
+
+        # Check if entry for this machine already exists
+        updated = False
+        output_lines: list[str] = []
+        i = 0
+        while i < len(existing_lines):
+            line = existing_lines[i]
+            if line.strip().startswith(f"machine {self.netrc_host}"):
+                # Skip this machine's existing entry (machine + login + password lines)
+                output_lines.append(f"machine {self.netrc_host}")
+                output_lines.append("    login anonymous")
+                output_lines.append(f"    password {token}")
+                updated = True
+                i += 1
+                # Skip following indented lines (login, password) for this machine
+                while i < len(existing_lines) and (
+                    existing_lines[i].startswith("    ")
+                    or existing_lines[i].startswith("\t")
+                    or existing_lines[i].strip().startswith("login")
+                    or existing_lines[i].strip().startswith("password")
+                ):
+                    i += 1
+            else:
+                output_lines.append(line)
+                i += 1
+
+        if not updated:
+            # Append new entry
+            if output_lines and output_lines[-1].strip():
+                output_lines.append("")  # Add blank line before new entry
+            output_lines.append(f"machine {self.netrc_host}")
+            output_lines.append("    login anonymous")
+            output_lines.append(f"    password {token}")
+
+        # Write file with secure permissions
+        netrc_path.write_text("\n".join(output_lines) + "\n")
+        netrc_path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 600 permissions
+
+        logger.info(f"Updated .netrc entry for {self.netrc_host}")
+
     def _verify_and_decode(self, token: str) -> None:
         """
         Verify the token signature and decode the payload.
@@ -337,31 +426,7 @@ class AuthenticationService:
             logger.debug("Details:", exc_info=True)
             self.decoded_token = unverified_payload
 
-    def _output_token(self, token: str) -> None:
-        """
-        Output the token in the configured format.
-
-        Args:
-            token: The access token to output.
-
-        Formats:
-            - 'json': Full JSON with token and decoded payload
-            - 'token': Just the token string (for shell capture)
-            - 'legacy': Git credential helper format
-        """
-        if self.output_format == "json":
-            output: Dict[str, Any] = {"access_token": token, "token_type": "Bearer"}
-            if self.decoded_token:
-                output["decoded"] = self.decoded_token
-            print(json.dumps(output, indent=2))
-        elif self.output_format == "token":
-            print(token)
-        elif self.output_format == "legacy":
-            print(f"login anonymous \npassword {token}")
-        else:
-            raise ValueError(f"Unknown output format: {self.output_format}")
-
-    def login(self) -> None:
+    def login(self, write_netrc: bool = False) -> TokenResult:
         """
         Execute the full authentication flow.
 
@@ -371,7 +436,13 @@ class AuthenticationService:
         3. OAuth2 authorization code flow
         4. Token exchange (if post_auth_hook configured)
         5. Token verification
-        6. Token output in configured format
+        6. Optionally write to .netrc file
+
+        Args:
+            write_netrc: If True, write/update the token in ~/.netrc file.
+
+        Returns:
+            TokenResult containing the access token and decoded payload.
 
         Raises:
             AuthenticationError: If any step of the authentication fails.
@@ -390,4 +461,8 @@ class AuthenticationService:
             token = self.post_auth_hook(token, self.config)
 
         self._verify_and_decode(token)
-        self._output_token(token)
+
+        if write_netrc:
+            self._write_netrc(token)
+
+        return TokenResult(access_token=token, decoded=self.decoded_token)

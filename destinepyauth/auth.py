@@ -3,20 +3,48 @@
 Command-line interface for DESP authentication.
 
 Usage:
-    auth --SERVICE <service_name> [--output <format>] [--verbose]
+    auth --SERVICE <service_name> [--output <format>] [--netrc] [--verbose]
 
 Examples:
-    auth --SERVICE eden                    # Get Eden token (legacy format)
-    auth --SERVICE highway --output token  # Get Highway token (just token)
-    auth --SERVICE cacheb --output json    # Get CacheB token (full JSON)
+    auth -s eden                     # Get Eden token (legacy format)
+    auth -s highway -o token         # Get Highway token (just token)
+    auth -s cacheb -o json           # Get CacheB token (full JSON)
+    auth -s cacheb --netrc           # Authenticate and write to ~/.netrc
 """
 
 import sys
 import argparse
+import json
 import logging
+from typing import Dict, Any
+
 from destinepyauth.services import ConfigurationFactory, ServiceRegistry
-from destinepyauth.authentication import AuthenticationService
+from destinepyauth.authentication import AuthenticationService, TokenResult
 from destinepyauth.exceptions import AuthenticationError
+
+
+def output_token(result: TokenResult, output_format: str) -> None:
+    """
+    Output the token in the specified format.
+
+    Args:
+        result: TokenResult from authentication.
+        output_format: One of 'json', 'token', or 'legacy'.
+    """
+    if output_format == "json":
+        output: Dict[str, Any] = {
+            "access_token": result.access_token,
+            "token_type": "Bearer",
+        }
+        if result.decoded:
+            output["decoded"] = result.decoded
+        print(json.dumps(output, indent=2))
+    elif output_format == "token":
+        print(result.access_token)
+    elif output_format == "legacy":
+        print(f"login anonymous \npassword {result.access_token}")
+    else:
+        raise ValueError(f"Unknown output format: {output_format}")
 
 
 def main() -> None:
@@ -57,6 +85,13 @@ def main() -> None:
         help="Output format: 'json' (full JSON), 'token' (just token), 'legacy' (git credential format)",
     )
 
+    parser.add_argument(
+        "--netrc",
+        "-n",
+        action="store_true",
+        help="Write/update token in ~/.netrc file for the service host",
+    )
+
     args = parser.parse_args()
 
     # Configure logging
@@ -76,9 +111,11 @@ def main() -> None:
             config=config,
             scope=scope,
             post_auth_hook=hook,
-            output_format=args.output,
         )
-        auth_service.login()
+        result = auth_service.login(write_netrc=args.netrc)
+
+        # Output the token
+        output_token(result, args.output)
 
     except AuthenticationError as e:
         logging.error(str(e))
