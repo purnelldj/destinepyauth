@@ -2,6 +2,7 @@
 
 import sys
 import argparse
+import logging
 
 from destinepyauth.services import ConfigurationFactory
 from destinepyauth.authentication import AuthenticationService
@@ -18,7 +19,22 @@ def main():
         help="Service name (e.g. 'streamer', 'cacheb', 'highway', etc.)",
     )
 
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Enable verbose (DEBUG) logging",
+    )
+
     args = parser.parse_args()
+
+    # Configure logging
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format="%(levelname)s: %(message)s",
+        stream=sys.stderr,
+    )
 
     try:
         # Load Config
@@ -31,7 +47,7 @@ def main():
         auth_service.login()
 
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+        logging.error(f"Error: {e}")
         sys.exit(1)
 
 

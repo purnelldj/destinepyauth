@@ -1,6 +1,8 @@
+import logging
 import requests
-import sys
 from destinepyauth.configs import BaseConfig
+
+logger = logging.getLogger(__name__)
 
 
 def highway_token_exchange(access_token: str, config: BaseConfig) -> str:
@@ -21,10 +23,17 @@ def highway_token_exchange(access_token: str, config: BaseConfig) -> str:
         "audience": audience,
     }
 
-    print("Exchanging DESP token for HIGHWAY token...", file=sys.stderr)
+    logger.info("Exchanging DESP token for HIGHWAY token...")
+    logger.debug(f"Highway token URL: {highway_token_url}")
+    logger.debug(f"Client ID: {client_id}")
+    logger.debug(f"Audience: {audience}")
+
     response = requests.post(highway_token_url, data=data)
 
     if response.status_code != 200:
+        logger.error(f"Exchange failed with status {response.status_code}")
+        logger.error(f"Response: {response.text}")
         raise Exception(f"Highway token exchange failed: {response.text}")
 
+    logger.info("Token exchange successful")
     return response.json()["access_token"]

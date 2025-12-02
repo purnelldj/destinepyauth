@@ -1,14 +1,17 @@
 import sys
 import getpass
 import json
+import logging
 from urllib.parse import parse_qs, urlparse
 from typing import Tuple, Optional, Callable
 
 import requests
 import jwt
-from jwt.algorithms import RSAAlgorithm
 from lxml import html
 from destinepyauth.configs import BaseConfig
+
+# Configure logger
+logger = logging.getLogger(__name__)
 
 
 class AuthenticationService:
@@ -29,18 +32,30 @@ class AuthenticationService:
         self.session = requests.Session()
         self.jwks_uri = None  # Will be discovered
 
+        # Log configuration
+        logger.debug("Configuration loaded:")
+        logger.debug(f"  IAM URL: {self.config.iam_url}")
+        logger.debug(f"  IAM Realm: {self.config.iam_realm}")
+        logger.debug(f"  IAM Client: {self.config.iam_client}")
+        logger.debug(f"  Redirect URI: {self.config.iam_redirect_uri}")
+        logger.debug(f"  Scope: {self.scope}")
+
     def _discover_endpoints(self):
         """Discover OIDC endpoints to get JWKS URI."""
         try:
             discovery_url = (
                 f"{self.config.iam_url}/realms/{self.config.iam_realm}/.well-known/openid-configuration"
             )
+            logger.debug(f"Discovering endpoints from {discovery_url}")
             resp = self.session.get(discovery_url)
             if resp.status_code == 200:
                 data = resp.json()
                 self.jwks_uri = data.get("jwks_uri")
+                logger.debug(f"Discovered JWKS URI: {self.jwks_uri}")
+            else:
+                logger.error(f"Discovery failed with status {resp.status_code}")
         except Exception as e:
-            print(f"Warning: Failed to discover OIDC endpoints: {e}", file=sys.stderr)
+            logger.warning(f"Failed to discover OIDC endpoints: {e}")
 
     def _get_credentials(self) -> Tuple[str, str]:
         """Retrieve username and password from config or prompt user."""
@@ -130,48 +145,86 @@ class AuthenticationService:
             raise Exception(f"Failed to get token: {response.text}")
 
         data = response.json()
-        # Return refresh_token if present (for offline_access), otherwise access_token
-        return data.get("refresh_token", data.get("access_token"))
+        # Return access_token (not refresh_token, as refresh tokens have different signing keys)
+        return data.get("access_token")
 
     def _verify_and_decode(self, token: str):
-        """Verify signature and decode token."""
-        print("\nVerifying token...", file=sys.stderr)
+        """Verify signature and decode token using the same approach as auth_eden.py."""
+        logger.info("Verifying token...")
         try:
-            # Get the Key ID from the header (without verification first)
+            # 1. Decode unverified first to get issuer/kid
             unverified_header = jwt.get_unverified_header(token)
+            unverified_payload = jwt.decode(token, options={"verify_signature": False})
+            issuer = unverified_payload.get("iss")
             kid = unverified_header.get("kid")
 
-            if not self.jwks_uri:
-                print("Skipping strict verification (JWKS URI not found). Decoded payload:", file=sys.stderr)
-                decoded = jwt.decode(token, options={"verify_signature": False})
-                print(json.dumps(decoded, indent=2), file=sys.stderr)
+            logger.debug(f"Token Issuer: {issuer}")
+            logger.debug(f"Token KID: {kid}")
+
+            target_jwks_uri = self.jwks_uri
+
+            # 2. If issuer differs from config, try to discover keys for that issuer
+            if issuer:
+                try:
+                    domain_check = urlparse(issuer).netloc
+                    config_domain = urlparse(self.config.iam_url).netloc
+
+                    if domain_check != config_domain or (self.config.iam_realm not in issuer):
+                        logger.debug(f"Token issuer ({issuer}) differs from config. Fetching new keys...")
+                        discovery_url = f"{issuer}/.well-known/openid-configuration"
+                        resp = requests.get(discovery_url, timeout=5)
+                        if resp.status_code == 200:
+                            target_jwks_uri = resp.json().get("jwks_uri")
+                            logger.debug(f"New JWKS URI: {target_jwks_uri}")
+                except Exception as e:
+                    logger.warning(f"Failed to discover keys for issuer {issuer}: {e}")
+
+            logger.debug(f"Using JWKS URI: {target_jwks_uri}")
+
+            if not target_jwks_uri:
+                logger.warning("Skipping strict verification (JWKS URI not found)")
+                logger.info("Decoded (unverified) payload:")
+                print(json.dumps(unverified_payload, indent=2), file=sys.stderr)
                 return
 
-            # Fetch JWKS
-            jwks = requests.get(self.jwks_uri).json()
-            public_key = None
-            for key in jwks["keys"]:
-                if key["kid"] == kid:
-                    public_key = RSAAlgorithm.from_jwk(json.dumps(key))
-                    break
+            # 3. Fetch JWKS and build public_keys dict (exactly like auth_eden.py)
+            json_certs = requests.get(target_jwks_uri).json().get("keys")
+            public_keys = {}
+            found_kids = []
+            for jwk in json_certs:
+                jwk_kid = jwk["kid"]
+                found_kids.append(jwk_kid)
+                public_keys[jwk_kid] = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
 
-            if public_key:
-                decoded = jwt.decode(
-                    token,
-                    public_key,
-                    algorithms=["RS256"],
-                    audience=self.config.iam_client,
-                    options={"verify_aud": False},
-                )  # verification of audience often tricky with multiple clients
-                print("Token verified successfully. Payload:", file=sys.stderr)
-                print(json.dumps(decoded, indent=2), file=sys.stderr)
-            else:
-                print(f"Could not find public key for kid {kid}. Decoded (unverified):", file=sys.stderr)
-                decoded = jwt.decode(token, options={"verify_signature": False})
-                print(json.dumps(decoded, indent=2), file=sys.stderr)
+            logger.debug(f"JWKS KIDs found: {found_kids}")
+
+            if kid not in public_keys:
+                logger.error(f"Could not find public key for kid {kid}. Available keys: {found_kids}")
+                logger.info("Decoded (unverified) payload:")
+                print(json.dumps(unverified_payload, indent=2), file=sys.stderr)
+                return
+
+            # 4. Decode and Verify (exactly like auth_eden.py)
+            decoded = jwt.decode(
+                token,
+                public_keys[kid],
+                algorithms=["RS256"],
+                options={"verify_aud": False},
+            )
+            logger.info("Token verified successfully")
+            logger.debug("Token payload:")
+            logger.debug(json.dumps(decoded, indent=2))
 
         except Exception as e:
-            print(f"Token verification failed: {e}", file=sys.stderr)
+            logger.error(f"Token verification failed: {e}")
+            logger.debug("Exception details:", exc_info=True)
+            # Fallback decode
+            try:
+                decoded = jwt.decode(token, options={"verify_signature": False})
+                logger.info("Decoded (unverified) payload:")
+                print(json.dumps(decoded, indent=2), file=sys.stderr)
+            except Exception:
+                pass
 
     def login(self):
         """Main execution method for the authentication flow."""
@@ -179,7 +232,7 @@ class AuthenticationService:
 
         user, password = self._get_credentials()
 
-        print(f"Authenticating on {self.config.iam_url} with user {user}", file=sys.stderr)
+        logger.info(f"Authenticating on {self.config.iam_url} with user {user}")
 
         # Step 1: Get form action
         auth_action_url = self._get_auth_url_action()
@@ -196,14 +249,8 @@ class AuthenticationService:
         # Step 5: Post-Auth Hook (e.g. Highway Token Exchange)
         if self.post_auth_hook:
             token = self.post_auth_hook(token, self.config)
-            # Note: The exchanged token might be signed by a different issuer/realm,
-            # so strict verification might fail if we use the original realm's JWKS.
-            # For Highway, the token comes from the Highway realm, not DESP.
-            # Re-discovery might be needed for verification of the exchanged token.
 
         # Step 6: Verify/Decode
-        # If we swapped tokens, we might want to skip verification or discover new JWKS
-        # For now, we attempt verification using the original context, or just decode if it fails/warns.
         self._verify_and_decode(token)
 
         # Output
