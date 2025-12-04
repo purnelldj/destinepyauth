@@ -11,9 +11,12 @@ from urllib.parse import parse_qs, urlparse
 from typing import Tuple, Optional, Callable, Dict, Any
 from dataclasses import dataclass
 
+import base64
 import requests
 from lxml import html
 from lxml.etree import ParserError
+
+from authlib.jose import JsonWebKey, jwt as authlib_jwt
 
 from keycloak import KeycloakOpenID
 from keycloak.exceptions import KeycloakError
@@ -335,34 +338,70 @@ class AuthenticationService:
         """
         logger.info("Verifying token...")
 
+        # Parse token header and payload without verifying signature
         try:
-            # Decode and verify the token using keycloak-python
-            decoded = self.keycloak_client.decode_token(
-                token,
-                # verify_signature=True,
-                # verify_aud=False,
-            )
-
-            logger.info("Token verified successfully")
-            logger.debug(json.dumps(decoded, indent=2))
-            self.decoded_token = decoded
-
-        except KeycloakError as e:
-            logger.warning(f"Token verification failed: {e}")
-            logger.debug("Falling back to unverified decode")
-            try:
-                # Fall back to unverified decode if verification fails
-                decoded = self.keycloak_client.decode_token(
-                    token,
-                )
-                logger.debug(json.dumps(decoded, indent=2))
-                self.decoded_token = decoded
-            except KeycloakError as fallback_error:
-                logger.error(f"Failed to decode token even without verification: {fallback_error}")
-                raise AuthenticationError(f"Token decode failed: {fallback_error}")
+            parts = token.split(".")
+            if len(parts) < 2:
+                raise AuthenticationError("Invalid token format")
+            header_b64, payload_b64 = parts[0], parts[1]
+            header_b64 += "=" * ((4 - len(header_b64) % 4) % 4)
+            payload_b64 += "=" * ((4 - len(payload_b64) % 4) % 4)
+            unverified_header = json.loads(base64.urlsafe_b64decode(header_b64.encode()))
+            unverified_payload = json.loads(base64.urlsafe_b64decode(payload_b64.encode()))
+            issuer = unverified_payload.get("iss")
+            kid = unverified_header.get("kid")
+            if not kid:
+                raise AuthenticationError("Token missing Key ID (kid)")
         except Exception as e:
-            logger.error(f"Token verification error: {e}")
-            raise AuthenticationError(f"Token verification error: {e}")
+            logger.error(f"Failed to parse token header/payload: {e}")
+            raise AuthenticationError(f"Invalid token: {e}")
+
+        # Ensure realm JWKS known
+        if not self.jwks_uri:
+            try:
+                self._discover_endpoints()
+            except Exception:
+                pass
+
+        # Discover issuer JWKS if issuer looks different
+        target_jwks_uri = self.jwks_uri
+        if issuer:
+            try:
+                issuer_domain = urlparse(issuer).netloc
+                config_domain = urlparse(self.config.iam_url).netloc
+                if issuer_domain != config_domain or (self.config.iam_realm not in issuer):
+                    resp = requests.get(f"{issuer}/.well-known/openid-configuration", timeout=5)
+                    resp.raise_for_status()
+                    target_jwks_uri = resp.json().get("jwks_uri")
+            except Exception as e:
+                logger.warning(f"Failed to discover issuer config: {e}")
+
+        if not target_jwks_uri:
+            logger.warning("No JWKS URI available; returning unverified payload")
+            self.decoded_token = unverified_payload
+            return
+
+        jwks_response = requests.get(target_jwks_uri, timeout=5)
+        jwks_response.raise_for_status()
+        jwks_json = jwks_response.json()
+
+        # Verify signature using authlib (imported as required in pyproject)
+        try:
+            key_set = JsonWebKey.import_key_set(jwks_json)
+            decoded = authlib_jwt.decode(token, key_set)
+            try:
+                claims = dict(decoded)
+            except Exception:
+                claims = decoded
+            logger.info("Token verified successfully via authlib JWKS")
+            logger.debug(json.dumps(claims, indent=2))
+            self.decoded_token = claims
+            return
+        except Exception as e:
+            logger.error(f"Authlib JWKS verification failed: {e}")
+            # fallback to returning unverified payload to preserve behavior
+            self.decoded_token = unverified_payload
+            return
 
     def login(self, write_netrc: bool = False) -> TokenResult:
         """

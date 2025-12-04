@@ -28,6 +28,7 @@ dependencies = [
     "pydantic_settings",
     "requests",
     "python-keycloak",
+    "authlib",
 ]
 
 [project.optional-dependencies]
