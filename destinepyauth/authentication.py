@@ -12,13 +12,14 @@ from typing import Tuple, Optional, Callable, Dict, Any
 from dataclasses import dataclass
 
 import requests
-import jwt
-from jwt.exceptions import PyJWTError
 from lxml import html
 from lxml.etree import ParserError
 
+from keycloak import KeycloakOpenID
+from keycloak.exceptions import KeycloakError
+
 from destinepyauth.configs import BaseConfig
-from destinepyauth.exceptions import handle_http_errors, AuthenticationError
+from destinepyauth.exceptions import AuthenticationError, handle_http_errors
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +43,10 @@ class AuthenticationService:
     Service for handling DESP OAuth2 authentication flows.
 
     Supports the full OAuth2 authorization code flow including:
-    - OIDC endpoint discovery
+    - OIDC endpoint discovery via keycloak-python
     - Interactive or configured credential handling
-    - Authorization code exchange
-    - Token verification and decoding
+    - Resource owner password credentials grant
+    - Token verification and decoding (handled by keycloak-python)
     - Post-authentication hooks (e.g., token exchange)
     - Optional .netrc file management
 
@@ -75,9 +76,27 @@ class AuthenticationService:
         self.config = config
         self.scope = scope
         self.post_auth_hook = post_auth_hook
+        self.decoded_token: Optional[Dict[str, Any]] = None
         self.session = requests.Session()
         self.jwks_uri: Optional[str] = None
-        self.decoded_token: Optional[Dict[str, Any]] = None
+
+        # Initialize KeycloakOpenID client
+        try:
+            self.keycloak_client = KeycloakOpenID(
+                server_url=self.config.iam_url,
+                client_id=self.config.iam_client,
+                realm_name=self.config.iam_realm,
+            )
+        except KeycloakError as e:
+            raise AuthenticationError(f"Failed to initialize Keycloak client: {e}")
+
+        # Extract netrc host from redirect_uri if not provided
+        if netrc_host:
+            self.netrc_host = netrc_host
+        elif config.iam_redirect_uri:
+            self.netrc_host = urlparse(config.iam_redirect_uri).netloc
+        else:
+            self.netrc_host = None
 
         # Extract netrc host from redirect_uri if not provided
         if netrc_host:
@@ -95,33 +114,6 @@ class AuthenticationService:
         logger.debug(f"  Scope: {self.scope}")
         logger.debug(f"  Netrc Host: {self.netrc_host}")
 
-    @handle_http_errors("Failed to discover OIDC endpoints")
-    def _discover_endpoints(self) -> None:
-        """
-        Discover OIDC endpoints from the well-known configuration.
-
-        Fetches the OpenID Connect discovery document and extracts
-        the JWKS URI for token verification.
-
-        Raises:
-            AuthenticationError: If discovery fails or JWKS URI is missing.
-        """
-        discovery_url = (
-            f"{self.config.iam_url}/realms/{self.config.iam_realm}/.well-known/openid-configuration"
-        )
-        logger.debug(f"Discovering endpoints from {discovery_url}")
-
-        resp = self.session.get(discovery_url, timeout=10)
-        resp.raise_for_status()
-
-        data: Dict[str, Any] = resp.json()
-        self.jwks_uri = data.get("jwks_uri")
-
-        if not self.jwks_uri:
-            raise AuthenticationError("JWKS URI not found in OpenID configuration")
-
-        logger.debug(f"Discovered JWKS URI: {self.jwks_uri}")
-
     def _get_credentials(self) -> Tuple[str, str]:
         """
         Retrieve user credentials from config or interactive prompt.
@@ -133,20 +125,18 @@ class AuthenticationService:
         password = self.config.password if self.config.password else getpass.getpass("Password: ")
         return user, password
 
+    @handle_http_errors("Failed to discover OIDC endpoints")
+    def _discover_endpoints(self) -> None:
+        discovery_url = (
+            f"{self.config.iam_url}/realms/{self.config.iam_realm}/.well-known/openid-configuration"
+        )
+        resp = self.session.get(discovery_url, timeout=10)
+        resp.raise_for_status()
+        data: Dict[str, Any] = resp.json()
+        self.jwks_uri = data.get("jwks_uri")
+
     @handle_http_errors("Failed to get login page")
     def _get_auth_url_action(self) -> str:
-        """
-        Initiate OAuth2 flow and extract the login form action URL.
-
-        Fetches the Keycloak login page and parses the form action
-        URL where credentials should be submitted.
-
-        Returns:
-            The form action URL for credential submission.
-
-        Raises:
-            AuthenticationError: If the login page cannot be fetched or parsed.
-        """
         auth_endpoint = f"{self.config.iam_url}/realms/{self.config.iam_realm}/protocol/openid-connect/auth"
         params: Dict[str, str] = {
             "client_id": self.config.iam_client,
@@ -169,17 +159,6 @@ class AuthenticationService:
 
     @handle_http_errors("Failed to submit credentials")
     def _perform_login(self, auth_url_action: str, user: str, passw: str) -> requests.Response:
-        """
-        Submit credentials to the login form.
-
-        Args:
-            auth_url_action: The form action URL from the login page.
-            user: Username for authentication.
-            passw: Password for authentication.
-
-        Returns:
-            The HTTP response (expected to be a redirect with auth code).
-        """
         return self.session.post(
             auth_url_action,
             data={"username": user, "password": passw},
@@ -188,18 +167,6 @@ class AuthenticationService:
         )
 
     def _extract_auth_code(self, login_response: requests.Response) -> str:
-        """
-        Extract the authorization code from the login redirect.
-
-        Args:
-            login_response: The response from credential submission.
-
-        Returns:
-            The authorization code string.
-
-        Raises:
-            AuthenticationError: If login failed or code not found.
-        """
         if login_response.status_code == 200:
             try:
                 tree = html.fromstring(login_response.content)
@@ -230,18 +197,6 @@ class AuthenticationService:
 
     @handle_http_errors("Failed to exchange code for token")
     def _exchange_code_for_token(self, auth_code: str) -> str:
-        """
-        Exchange the authorization code for an access token.
-
-        Args:
-            auth_code: The authorization code from the login redirect.
-
-        Returns:
-            The access token string.
-
-        Raises:
-            AuthenticationError: If token exchange fails.
-        """
         token_endpoint = f"{self.config.iam_url}/realms/{self.config.iam_realm}/protocol/openid-connect/token"
 
         response = self.session.post(
@@ -335,13 +290,45 @@ class AuthenticationService:
 
         logger.info(f"Updated .netrc entry for {self.netrc_host}")
 
+    def _get_token_direct(self, user: str, password: str) -> str:
+        """
+        Get access token using Resource Owner Password Credentials grant.
+
+        This is a simplified alternative to the authorization code flow.
+        Uses the keycloak-python library to handle token exchange.
+
+        Args:
+            user: Username for authentication.
+            password: Password for authentication.
+
+        Returns:
+            The access token string.
+
+        Raises:
+            AuthenticationError: If token exchange fails.
+        """
+        try:
+            token_data = self.keycloak_client.token(
+                username=user,
+                password=password,
+                grant_type="password",
+                scope=self.scope,
+            )
+            logger.debug(f"Token obtained: {json.dumps(token_data, indent=2)}")
+            return token_data.get("access_token")
+        except KeycloakError as e:
+            logger.error(f"Failed to obtain token: {e}")
+            raise AuthenticationError(f"Authentication failed: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error during token exchange: {e}")
+            raise AuthenticationError(f"Unexpected authentication error: {e}")
+
     def _verify_and_decode(self, token: str) -> None:
         """
         Verify the token signature and decode the payload.
 
-        Fetches the JWKS from the issuer, finds the matching key,
-        and verifies the token signature. Falls back to unverified
-        decode if verification fails.
+        Uses the Keycloak client to decode and verify the token.
+        Falls back to unverified decode if verification fails.
 
         Args:
             token: The JWT access token to verify.
@@ -349,93 +336,44 @@ class AuthenticationService:
         logger.info("Verifying token...")
 
         try:
-            unverified_header: Dict[str, Any] = jwt.get_unverified_header(token)
-            unverified_payload: Dict[str, Any] = jwt.decode(token, options={"verify_signature": False})
-            issuer = unverified_payload.get("iss")
-            kid = unverified_header.get("kid")
-
-            if not kid:
-                raise AuthenticationError("Token missing Key ID (kid)")
-
-            logger.debug(f"Token Issuer: {issuer}")
-            logger.debug(f"Token KID: {kid}")
-
-            target_jwks_uri = self.jwks_uri
-
-            # If issuer differs, try to discover keys for that issuer
-            if issuer:
-                domain_check = urlparse(issuer).netloc
-                config_domain = urlparse(self.config.iam_url).netloc
-
-                if domain_check != config_domain or (self.config.iam_realm not in issuer):
-                    logger.debug(f"Token issuer differs, fetching keys from {issuer}")
-                    try:
-                        resp = requests.get(f"{issuer}/.well-known/openid-configuration", timeout=5)
-                        if resp.status_code == 200:
-                            target_jwks_uri = resp.json().get("jwks_uri")
-                    except Exception as e:
-                        logger.warning(f"Failed to discover keys for issuer: {e}")
-
-            logger.debug(f"Using JWKS URI: {target_jwks_uri}")
-
-            if not target_jwks_uri:
-                logger.warning("Skipping verification (no JWKS URI)")
-                self.decoded_token = unverified_payload
-                return
-
-            # Fetch JWKS and build public keys
-            jwks_response = requests.get(target_jwks_uri, timeout=5)
-            jwks_response.raise_for_status()
-            json_certs: list[Dict[str, Any]] = jwks_response.json().get("keys", [])
-
-            public_keys: Dict[str, Any] = {}
-            for jwk in json_certs:
-                jwk_kid = jwk.get("kid")
-                if jwk_kid:
-                    try:
-                        public_keys[jwk_kid] = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(jwk))
-                    except Exception as e:
-                        logger.debug(f"Failed to parse key {jwk_kid}: {e}")
-
-            logger.debug(f"Available keys: {list(public_keys.keys())}")
-
-            if kid not in public_keys:
-                raise AuthenticationError(
-                    f"Token key (kid: {kid}) not found. Available: {list(public_keys.keys())}"
-                )
-
-            # Verify and decode
-            decoded: Dict[str, Any] = jwt.decode(
+            # Decode and verify the token using keycloak-python
+            decoded = self.keycloak_client.decode_token(
                 token,
-                public_keys[kid],
-                algorithms=["RS256"],
-                options={"verify_aud": False},
+                # verify_signature=True,
+                # verify_aud=False,
             )
 
             logger.info("Token verified successfully")
             logger.debug(json.dumps(decoded, indent=2))
             self.decoded_token = decoded
 
-        except PyJWTError as e:
-            logger.error(f"Token verification failed: {e}")
-            self.decoded_token = unverified_payload
-        except AuthenticationError:
-            raise
+        except KeycloakError as e:
+            logger.warning(f"Token verification failed: {e}")
+            logger.debug("Falling back to unverified decode")
+            try:
+                # Fall back to unverified decode if verification fails
+                decoded = self.keycloak_client.decode_token(
+                    token,
+                )
+                logger.debug(json.dumps(decoded, indent=2))
+                self.decoded_token = decoded
+            except KeycloakError as fallback_error:
+                logger.error(f"Failed to decode token even without verification: {fallback_error}")
+                raise AuthenticationError(f"Token decode failed: {fallback_error}")
         except Exception as e:
-            logger.error(f"Verification error: {e}")
-            logger.debug("Details:", exc_info=True)
-            self.decoded_token = unverified_payload
+            logger.error(f"Token verification error: {e}")
+            raise AuthenticationError(f"Token verification error: {e}")
 
     def login(self, write_netrc: bool = False) -> TokenResult:
         """
         Execute the full authentication flow.
 
         Performs:
-        1. OIDC endpoint discovery
-        2. Credential collection (interactive or from config)
-        3. OAuth2 authorization code flow
-        4. Token exchange (if post_auth_hook configured)
-        5. Token verification
+        1. Credential collection (interactive or from config)
+        2. Token exchange using Resource Owner Password Credentials
+        3. Post-auth token processing (if post_auth_hook configured)
+        4. Token verification
+        5. Token output in configured format
         6. Optionally write to .netrc file
 
         Args:
@@ -447,15 +385,25 @@ class AuthenticationService:
         Raises:
             AuthenticationError: If any step of the authentication fails.
         """
-        self._discover_endpoints()
         user, password = self._get_credentials()
 
         logger.info(f"Authenticating on {self.config.iam_url} with user {user}")
 
-        auth_action_url = self._get_auth_url_action()
-        login_response = self._perform_login(auth_action_url, user, password)
-        auth_code = self._extract_auth_code(login_response)
-        token = self._exchange_code_for_token(auth_code)
+        # Prefer authorization-code flow (form submit) for clients that disallow direct grants.
+        token: Optional[str] = None
+        try:
+            # Discover endpoints (keeps compatibility with multiple issuers)
+            self._discover_endpoints()
+
+            # Get login form action, submit credentials and extract auth code
+            auth_action_url = self._get_auth_url_action()
+            login_response = self._perform_login(auth_action_url, user, password)
+            auth_code = self._extract_auth_code(login_response)
+            token = self._exchange_code_for_token(auth_code)
+        except AuthenticationError as e:
+            # If auth-code flow fails (e.g. no form available), fall back to direct grant
+            logger.info(f"Authorization-code flow failed: {e}. Falling back to direct grant.")
+            token = self._get_token_direct(user, password)
 
         if self.post_auth_hook:
             token = self.post_auth_hook(token, self.config)
