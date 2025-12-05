@@ -34,6 +34,9 @@ class TokenResult:
     access_token: str
     """The access token string."""
 
+    refresh_token: Optional[str] = None
+    """The refresh token string (if available)."""
+
     decoded: Optional[Dict[str, Any]] = None
     """Decoded token payload (if verification succeeded)."""
 
@@ -199,7 +202,7 @@ class AuthenticationService:
         return parsed["code"][0]
 
     @handle_http_errors("Failed to exchange code for token")
-    def _exchange_code_for_token(self, auth_code: str) -> str:
+    def _exchange_code_for_token(self, auth_code: str) -> Dict[str, Any]:
         token_endpoint = f"{self.config.iam_url}/realms/{self.config.iam_realm}/protocol/openid-connect/token"
 
         response = self.session.post(
@@ -223,12 +226,11 @@ class AuthenticationService:
             raise AuthenticationError(f"Token exchange failed: {error_msg}")
 
         data: Dict[str, Any] = response.json()
-        access_token = data.get("access_token")
 
-        if not access_token:
-            raise AuthenticationError("No access token in response")
+        if "access_token" not in data and "refresh_token" not in data:
+            raise AuthenticationError("No token in response")
 
-        return access_token
+        return data
 
     def _write_netrc(self, token: str, netrc_path: Optional[Path] = None) -> None:
         """
@@ -293,7 +295,7 @@ class AuthenticationService:
 
         logger.info(f"Updated .netrc entry for {self.netrc_host}")
 
-    def _get_token_direct(self, user: str, password: str) -> str:
+    def _get_token_direct(self, user: str, password: str) -> Dict[str, Any]:
         """
         Get access token using Resource Owner Password Credentials grant.
 
@@ -305,7 +307,7 @@ class AuthenticationService:
             password: Password for authentication.
 
         Returns:
-            The access token string.
+            The token data dictionary (may contain access_token and refresh_token).
 
         Raises:
             AuthenticationError: If token exchange fails.
@@ -318,7 +320,7 @@ class AuthenticationService:
                 scope=self.scope,
             )
             logger.debug(f"Token obtained: {json.dumps(token_data, indent=2)}")
-            return token_data.get("access_token")
+            return token_data
         except KeycloakError as e:
             logger.error(f"Failed to obtain token: {e}")
             raise AuthenticationError(f"Authentication failed: {e}")
@@ -429,7 +431,7 @@ class AuthenticationService:
         logger.info(f"Authenticating on {self.config.iam_url} with user {user}")
 
         # Prefer authorization-code flow (form submit) for clients that disallow direct grants.
-        token: Optional[str] = None
+        token_data: Optional[Dict[str, Any]] = None
         try:
             # Discover endpoints (keeps compatibility with multiple issuers)
             self._discover_endpoints()
@@ -438,18 +440,32 @@ class AuthenticationService:
             auth_action_url = self._get_auth_url_action()
             login_response = self._perform_login(auth_action_url, user, password)
             auth_code = self._extract_auth_code(login_response)
-            token = self._exchange_code_for_token(auth_code)
+            token_data = self._exchange_code_for_token(auth_code)
         except AuthenticationError as e:
             # If auth-code flow fails (e.g. no form available), fall back to direct grant
             logger.info(f"Authorization-code flow failed: {e}. Falling back to direct grant.")
-            token = self._get_token_direct(user, password)
+            token_data = self._get_token_direct(user, password)
+        if not token_data:
+            raise AuthenticationError("Failed to obtain token data")
 
-        if self.post_auth_hook:
-            token = self.post_auth_hook(token, self.config)
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
 
-        self._verify_and_decode(token)
+        if self.post_auth_hook and access_token:
+            access_token = self.post_auth_hook(access_token, self.config)
 
+        # Verify and decode using access token (if available)
+        if access_token:
+            self._verify_and_decode(access_token)
+        else:
+            self.decoded_token = None
+
+        # When writing to .netrc, prefer storing the refresh token (if present),
+        # otherwise fall back to the access token to preserve previous behavior.
         if write_netrc:
-            self._write_netrc(token)
+            token_to_store = refresh_token or access_token
+            if not token_to_store:
+                raise AuthenticationError("No token available to write to .netrc")
+            self._write_netrc(token_to_store)
 
-        return TokenResult(access_token=token, decoded=self.decoded_token)
+        return TokenResult(access_token=access_token, refresh_token=refresh_token, decoded=self.decoded_token)
