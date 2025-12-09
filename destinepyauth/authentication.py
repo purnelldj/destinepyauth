@@ -295,39 +295,6 @@ class AuthenticationService:
 
         logger.info(f"Updated .netrc entry for {self.netrc_host}")
 
-    def _get_token_direct(self, user: str, password: str) -> Dict[str, Any]:
-        """
-        Get access token using Resource Owner Password Credentials grant.
-
-        This is a simplified alternative to the authorization code flow.
-        Uses the keycloak-python library to handle token exchange.
-
-        Args:
-            user: Username for authentication.
-            password: Password for authentication.
-
-        Returns:
-            The token data dictionary (may contain access_token and refresh_token).
-
-        Raises:
-            AuthenticationError: If token exchange fails.
-        """
-        try:
-            token_data = self.keycloak_client.token(
-                username=user,
-                password=password,
-                grant_type="password",
-                scope=self.scope,
-            )
-            logger.debug(f"Token obtained: {json.dumps(token_data, indent=2)}")
-            return token_data
-        except KeycloakError as e:
-            logger.error(f"Failed to obtain token: {e}")
-            raise AuthenticationError(f"Authentication failed: {e}")
-        except Exception as e:
-            logger.error(f"Unexpected error during token exchange: {e}")
-            raise AuthenticationError(f"Unexpected authentication error: {e}")
-
     def _verify_and_decode(self, token: str) -> None:
         """
         Verify the token signature and decode the payload.
@@ -432,19 +399,15 @@ class AuthenticationService:
 
         # Prefer authorization-code flow (form submit) for clients that disallow direct grants.
         token_data: Optional[Dict[str, Any]] = None
-        try:
-            # Discover endpoints (keeps compatibility with multiple issuers)
-            self._discover_endpoints()
+        # Discover endpoints (keeps compatibility with multiple issuers)
+        self._discover_endpoints()
 
-            # Get login form action, submit credentials and extract auth code
-            auth_action_url = self._get_auth_url_action()
-            login_response = self._perform_login(auth_action_url, user, password)
-            auth_code = self._extract_auth_code(login_response)
-            token_data = self._exchange_code_for_token(auth_code)
-        except AuthenticationError as e:
-            # If auth-code flow fails (e.g. no form available), fall back to direct grant
-            logger.info(f"Authorization-code flow failed: {e}. Falling back to direct grant.")
-            token_data = self._get_token_direct(user, password)
+        # Get login form action, submit credentials and extract auth code
+        auth_action_url = self._get_auth_url_action()
+        login_response = self._perform_login(auth_action_url, user, password)
+        auth_code = self._extract_auth_code(login_response)
+        token_data = self._exchange_code_for_token(auth_code)
+
         if not token_data:
             raise AuthenticationError("Failed to obtain token data")
 
