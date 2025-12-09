@@ -45,7 +45,7 @@ def highway_token_exchange(access_token: str, config: BaseConfig) -> str:
         "audience": HIGHWAY_AUDIENCE,
     }
 
-    logger.info("Exchanging DESP token for HIGHWAY token...")
+    logger.debug("Exchanging DESP token for HIGHWAY token...")
     logger.debug(f"Client ID: {config.iam_client}")
 
     response = requests.post(HIGHWAY_TOKEN_URL, data=data, timeout=10)

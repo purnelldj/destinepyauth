@@ -338,7 +338,7 @@ class AuthenticationService:
         Args:
             token: The JWT access token to verify.
         """
-        logger.info("Verifying token...")
+        logger.debug("Verifying token...")
 
         # Parse token header and payload without verifying signature
         try:
@@ -395,12 +395,12 @@ class AuthenticationService:
                 claims = dict(decoded)
             except Exception:
                 claims = decoded
-            logger.info("Token verified successfully via authlib JWKS")
+            logger.info("Token verified successfully")
             logger.debug(json.dumps(claims, indent=2))
             self.decoded_token = claims
             return
         except Exception as e:
-            logger.error(f"Authlib JWKS verification failed: {e}")
+            logger.error(f"Token verification failed: {e}")
             # fallback to returning unverified payload to preserve behavior
             self.decoded_token = unverified_payload
             return

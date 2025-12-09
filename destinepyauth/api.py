@@ -6,6 +6,7 @@ against DESP services without needing to understand the underlying
 authentication flow.
 """
 
+import logging
 from typing import Optional
 
 from destinepyauth.authentication import AuthenticationService, TokenResult
@@ -32,6 +33,7 @@ def get_token(
     username: Optional[str] = None,
     password: Optional[str] = None,
     write_netrc: bool = False,
+    verbose: bool = False,
 ) -> TokenResult:
     """
     Authenticate and get an access token for a DESP service.
@@ -45,6 +47,7 @@ def get_token(
         username: DESP username. If None, uses DESPAUTH_USER env var or prompts.
         password: DESP password. If None, uses DESPAUTH_PASSWORD env var or prompts.
         write_netrc: If True, write/update the token in ~/.netrc file.
+        verbose: If True, print logs at DEBUG level.
 
     Returns:
         TokenResult containing access_token and decoded payload.
@@ -72,6 +75,10 @@ def get_token(
         >>> ds = xr.open_dataset(url, engine="zarr",
         ...     storage_options={"client_kwargs": {"trust_env": True}})
     """
+    # See logs
+    log_level = logging.INFO if not verbose else logging.DEBUG
+    logging.getLogger().setLevel(log_level)
+
     # Load configuration for the service
     config, scope, hook = ConfigurationFactory.load_config(service)
 
