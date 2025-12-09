@@ -75,9 +75,10 @@ def get_token(
         >>> ds = xr.open_dataset(url, engine="zarr",
         ...     storage_options={"client_kwargs": {"trust_env": True}})
     """
-    # See logs
+    # Configure only the library logger (do not change the root logger).
+    # Applications (including notebooks) should configure handlers.
     log_level = logging.INFO if not verbose else logging.DEBUG
-    logging.getLogger().setLevel(log_level)
+    logging.getLogger("destinepyauth").setLevel(log_level)
 
     # Load configuration for the service
     config, scope, hook = ConfigurationFactory.load_config(service)

@@ -15,6 +15,8 @@ For services that use .netrc (like CacheB with zarr):
     >>> # Now zarr/xarray will automatically use credentials from ~/.netrc
 """
 
+import logging
+
 from destinepyauth.api import get_token, list_services
 from destinepyauth.authentication import AuthenticationService, TokenResult
 from destinepyauth.exceptions import AuthenticationError
@@ -26,3 +28,7 @@ __all__ = [
     "AuthenticationService",
     "AuthenticationError",
 ]
+
+# Ensure library doesn't configure logging for the application.
+# Applications (including notebooks) should configure logging.
+logging.getLogger(__name__).addHandler(logging.NullHandler())
