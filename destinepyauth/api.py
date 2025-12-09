@@ -10,22 +10,7 @@ import logging
 from typing import Optional
 
 from destinepyauth.authentication import AuthenticationService, TokenResult
-from destinepyauth.services import ConfigurationFactory, ServiceRegistry
-
-
-def list_services() -> list[str]:
-    """
-    List all available service names.
-
-    Returns:
-        List of service names that can be used with get_token().
-
-    Example:
-        >>> from destinepyauth import list_services
-        >>> list_services()
-        ['cacheb', 'streamer', 'insula', 'eden', 'dea', 'highway']
-    """
-    return ServiceRegistry.list_services()
+from destinepyauth.services import ConfigurationFactory
 
 
 def get_token(

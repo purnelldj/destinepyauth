@@ -17,13 +17,12 @@ For services that use .netrc (like CacheB with zarr):
 
 import logging
 
-from destinepyauth.api import get_token, list_services
+from destinepyauth.api import get_token
 from destinepyauth.authentication import AuthenticationService, TokenResult
 from destinepyauth.exceptions import AuthenticationError
 
 __all__ = [
     "get_token",
-    "list_services",
     "TokenResult",
     "AuthenticationService",
     "AuthenticationError",

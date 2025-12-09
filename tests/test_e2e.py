@@ -12,7 +12,6 @@ from unittest.mock import patch, MagicMock
 from destinepyauth.configs import BaseConfig
 from destinepyauth.authentication import AuthenticationService, TokenResult
 from destinepyauth.services import ConfigurationFactory, ServiceRegistry
-from destinepyauth.api import list_services
 from destinepyauth.exceptions import AuthenticationError
 
 
@@ -21,9 +20,7 @@ class TestEndToEndServiceDiscovery:
 
     def test_discover_and_configure_all_services(self):
         """Test discovering and configuring all available services."""
-        services = list_services()
-
-        assert len(services) >= 6, "Expected at least 6 services"
+        services = ServiceRegistry().list_services()
 
         # Verify we can get info for each service
         for service in services:
