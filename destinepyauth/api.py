@@ -28,7 +28,7 @@ def get_token(
     environment variables or prompted interactively.
 
     Args:
-        service: Service name (e.g., 'highway', 'cacheb', 'eden', 'insula').
+        service: Service name (e.g., 'highway', 'cacheb', 'eden', 'insula', 'streamer', 'dea').
         username: DESP username. If None, uses DESPAUTH_USER env var or prompts.
         password: DESP password. If None, uses DESPAUTH_PASSWORD env var or prompts.
         write_netrc: If True, write/update the token in ~/.netrc file.

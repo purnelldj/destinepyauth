@@ -6,7 +6,7 @@ Usage:
     auth --SERVICE <service_name> [--output <format>] [--netrc] [--verbose]
 
 Examples:
-    auth -s eden                     # Get Eden token (legacy format)
+    auth -s eden                     # Get Eden token (just token)
     auth -s highway -o token         # Get Highway token (just token)
     auth -s cacheb -o json           # Get CacheB token (full JSON)
     auth -s cacheb --netrc           # Authenticate and write to ~/.netrc
@@ -29,7 +29,7 @@ def output_token(result: TokenResult, output_format: str) -> None:
 
     Args:
         result: TokenResult from authentication.
-        output_format: One of 'json', 'token', or 'legacy'.
+        output_format: One of 'json', 'token'.
     """
     if output_format == "json":
         output: Dict[str, Any] = {
@@ -41,8 +41,6 @@ def output_token(result: TokenResult, output_format: str) -> None:
         print(json.dumps(output, indent=2))
     elif output_format == "token":
         print(result.access_token)
-    elif output_format == "legacy":
-        print(f"login anonymous \npassword {result.access_token}")
     else:
         raise ValueError(f"Unknown output format: {output_format}")
 
@@ -80,9 +78,9 @@ def main() -> None:
         "--output",
         "-o",
         type=str,
-        choices=["json", "token", "legacy"],
-        default="legacy",
-        help="Output format: 'json' (full JSON), 'token' (just token), 'legacy' (git credential format)",
+        choices=["json", "token"],
+        default="token",
+        help="Output format: 'json' (full JSON), 'token' (just token)",
     )
 
     parser.add_argument(
