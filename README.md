@@ -88,7 +88,3 @@ result = get_token("highway")
 
 This ensures credentials cannot be accidentally exposed in terminal logs, screen recordings,
 or shell history.
-
-## License
-
-BSD-3-Clause
