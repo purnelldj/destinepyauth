@@ -116,16 +116,6 @@ class AuthenticationService:
         password = self.config.password if self.config.password else getpass.getpass("Password: ")
         return user, password
 
-    @handle_http_errors("Failed to discover OIDC endpoints")
-    def _discover_endpoints(self) -> None:
-        discovery_url = (
-            f"{self.config.iam_url}/realms/{self.config.iam_realm}/.well-known/openid-configuration"
-        )
-        resp = self.session.get(discovery_url, timeout=10)
-        resp.raise_for_status()
-        data: Dict[str, Any] = resp.json()
-        self.jwks_uri = data.get("jwks_uri")
-
     @handle_http_errors("Failed to get login page")
     def _get_auth_url_action(self) -> str:
         auth_endpoint = f"{self.config.iam_url}/realms/{self.config.iam_realm}/protocol/openid-connect/auth"
@@ -360,8 +350,6 @@ class AuthenticationService:
 
         # Prefer authorization-code flow (form submit) for clients that disallow direct grants.
         token_data: Optional[Dict[str, Any]] = None
-        # Discover endpoints (keeps compatibility with multiple issuers)
-        self._discover_endpoints()
 
         # Get login form action, submit credentials and extract auth code
         auth_action_url = self._get_auth_url_action()
