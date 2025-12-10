@@ -2,9 +2,14 @@
 """
 Configuration model for DESP authentication.
 
-This module defines the base configuration class that supports
-CLI arguments, environment variables, and config files via Conflator.
-Service-specific defaults are applied by the ServiceRegistry.
+This module defines the base configuration class that supports loading
+settings via Conflator. Conflator can pull values from environment
+variables and config files, and it can also be configured to accept
+command-line arguments (the `CLIArg` metadata on fields documents the
+flags to use when that mode is enabled).
+
+Service-specific defaults are applied by the `ServiceRegistry` after
+loading the configuration.
 """
 
 from typing import Annotated
@@ -17,10 +22,15 @@ class BaseConfig(ConfigModel):
     """
     Base configuration for DESP authentication.
 
-    All fields can be set via:
-    - CLI arguments (e.g., --user, --iam-url)
-    - Environment variables (e.g., DESPAUTH_USER, DESPAUTH_IAM_URL)
-    - Config files (~/.config/despauth/config.yaml)
+        Fields support these Conflator-backed sources (when Conflator is used
+        to load configuration):
+
+        - Environment variables (names are defined with `EnvVar`, e.g. `USER`,
+            `PASSWORD`, `IAM_URL`, `REALM`, `CLIENT_ID`, `REDIRECT_URI`)
+        - Config files (for example: `~/.config/despauth/config.yaml`)
+        - Command-line arguments (flags are documented with `CLIArg`, e.g.
+            `-u/--user`, `--iam-url`) when Conflator is configured to parse
+            CLI arguments.
 
     Service-specific defaults (iam_client, iam_redirect_uri) are applied
     by the ServiceRegistry after loading.

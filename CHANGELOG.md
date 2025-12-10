@@ -8,7 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Each release can have sections: "Added", "Changed", "Deprecated", "Removed", "Fixed" and "Security".
 
-## pre-release
+## [1.0.0] - 09-12-2025
 
-- Copied auth scripts from DESP-UserWorkflowService-Templates
+### added
 
+- Generate access tokens for DESP using CLI or the function "get_tokens"
+- Github actions workflow to install, check linter errors, run tests on pull request
