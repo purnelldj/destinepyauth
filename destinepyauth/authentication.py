@@ -270,12 +270,15 @@ class AuthenticationService:
 
         logger.info(f"Updated .netrc entry for {self.netrc_host}")
 
-    def _verify_and_decode(self, token: str) -> None:
+    def _verify_and_decode(self, token: str) -> Dict | None:
         """
         Verify the token signature and decode the payload.
 
         Args:
             token: The JWT access token to verify.
+
+        Return:
+            dict: The decoded token.
         """
         logger.debug("Verifying token...")
 
@@ -318,10 +321,10 @@ class AuthenticationService:
             claims = dict(claims)
             logger.info("Token verified successfully")
             logger.debug(json.dumps(claims, indent=2))
-            self.decoded_token = claims
+            return claims
         except Exception as e:
             logger.error(f"Token verification failed: {e}")
-        return
+            return None
 
     def login(self, write_netrc: bool = False) -> TokenResult:
         """
@@ -348,9 +351,6 @@ class AuthenticationService:
 
         logger.info(f"Authenticating on {self.config.iam_url} with user {user}")
 
-        # Prefer authorization-code flow (form submit) for clients that disallow direct grants.
-        token_data: Optional[Dict[str, Any]] = None
-
         # Get login form action, submit credentials and extract auth code
         auth_action_url = self._get_auth_url_action()
         login_response = self._perform_login(auth_action_url, user, password)
@@ -367,17 +367,12 @@ class AuthenticationService:
             access_token = self.post_auth_hook(access_token, self.config)
 
         # Verify and decode using access token (if available)
-        if access_token:
-            self._verify_and_decode(access_token)
-        else:
-            self.decoded_token = None
+        self.decoded_token = self._verify_and_decode(access_token)
 
-        # When writing to .netrc, prefer storing the refresh token (if present),
-        # otherwise fall back to the access token to preserve previous behavior.
         if write_netrc:
-            token_to_store = refresh_token or access_token
-            if not token_to_store:
+            # Write refresh token to .netrc
+            if not refresh_token:
                 raise AuthenticationError("No token available to write to .netrc")
-            self._write_netrc(token_to_store)
+            self._write_netrc(refresh_token)
 
         return TokenResult(access_token=access_token, refresh_token=refresh_token, decoded=self.decoded_token)
