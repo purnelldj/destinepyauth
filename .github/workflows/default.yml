@@ -27,7 +27,7 @@ jobs:
     - name: Highway authentication
       run: python -c "from destinepyauth import get_token; get_token('highway')"
     - name: CacheB authentication
-      run: python -c "from destinepyauth import get_token; get_token('cacheb')"
+      run: python -c "from destinepyauth import get_token; get_token('cacheb', write_netrc=True)"
     - name: DestinE Streamer authentication
       run: python -c "from destinepyauth import get_token; get_token('streamer')"
     - name: Insula authentication
