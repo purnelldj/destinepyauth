@@ -11,21 +11,13 @@ requires-python = ">= 3.9"
 keywords = ["DestinE", "authentication"]
 classifiers = [
     "Development Status :: 4 - Beta",
-    "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: Apache 2.0",
-    "Operating System :: OS Independent",
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
     "conflator",
-    "PyJWT[crypto]",
     "lxml",
     "pydantic",
-    "pydantic_settings",
     "requests",
     "authlib",
 ]
