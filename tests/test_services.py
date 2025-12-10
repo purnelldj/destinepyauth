@@ -87,3 +87,15 @@ class TestConfigurationFactory:
         # Defaults should be applied
         assert config.iam_client == "hda-broker-public"
         assert config.iam_redirect_uri == "https://broker.eden.destine.eu/"
+
+    def test_all_redirect_uris_are_https(self):
+        """Test that all service redirect URIs use HTTPS."""
+        from urllib.parse import urlparse
+
+        for service in ServiceRegistry.list_services():
+            info = ServiceRegistry.get_service_info(service)
+            redirect_uri = info["defaults"]["iam_redirect_uri"]
+            parsed = urlparse(redirect_uri)
+
+            assert redirect_uri.startswith("https://"), f"{service} has non-HTTPS redirect URI"
+            assert parsed.netloc, f"{service} redirect URI has no hostname"
