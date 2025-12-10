@@ -1,126 +1,119 @@
-#! /usr/bin/env python3
+#!/usr/bin/env python3
+"""Command-line interface for DESP authentication."""
 
-from typing import Annotated
-from urllib.parse import parse_qs, urlparse
 import sys
+import argparse
+import json
+import logging
+from typing import Dict, Any
 
-import requests
-from conflator import CLIArg, ConfigModel, Conflator, EnvVar
-from lxml import html
-from pydantic import Field
-import getpass
-
-SERVICE_URL = "https://cacheb.dcms.destine.eu/"
-
-
-class Config(ConfigModel):
-    user: Annotated[
-        str | None,
-        Field(description="Your DESP username"),
-        CLIArg("-u", "--user"),
-        EnvVar("USER"),
-    ] = None
-    password: Annotated[
-        str | None,
-        Field(description="Your DESP password"),
-        CLIArg("-p", "--password"),
-        EnvVar("PASSWORD"),
-    ] = None
-    iam_url: Annotated[
-        str,
-        Field(description="The URL of the IAM server"),
-        CLIArg("--iam-url"),
-        EnvVar("IAM_URL"),
-    ] = "https://auth.destine.eu"
-    iam_realm: Annotated[
-        str,
-        Field(description="The realm of the IAM server"),
-        CLIArg("--iam-realm"),
-        EnvVar("REALM"),
-    ] = "desp"
-    iam_client: Annotated[
-        str,
-        Field(description="The client ID of the IAM server"),
-        CLIArg("--iam-client"),
-        EnvVar("CLIENT_ID"),
-    ] = "edh-public"
+from destinepyauth.services import ConfigurationFactory, ServiceRegistry
+from destinepyauth.authentication import AuthenticationService, TokenResult
+from destinepyauth.exceptions import AuthenticationError
 
 
-def main():
-    config = Conflator("despauth", Config).load()
-
-    if config.user is None:
-        user = input("Username: ")
-    else:
-        user = config.user
-
-    if config.password is None:
-        password = getpass.getpass("Password: ")
-    else:
-        password = config.password
-
-    print(f"Authenticating on {config.iam_url} with user {user}", file=sys.stderr)
-
-    with requests.Session() as s:
-        # Get the auth url
-        response = s.get(
-            url=config.iam_url + "/realms/" + config.iam_realm + "/protocol/openid-connect/auth",
-            params={
-                "client_id": config.iam_client,
-                "redirect_uri": SERVICE_URL,
-                "scope": "openid offline_access",
-                "response_type": "code",
-            },
-        )
-        response.raise_for_status()
-        auth_url = html.fromstring(response.content.decode()).forms[0].action
-
-        # Login and get auth code
-        login = s.post(
-            auth_url,
-            data={
-                "username": user,
-                "password": password,
-            },
-            allow_redirects=False,
-        )
-
-        # We expect a 302, a 200 means we got sent back to the login page and there's probably an error message
-        if login.status_code == 200:
-            tree = html.fromstring(login.content)
-            error_message_element = tree.xpath('//span[@id="input-error"]/text()')
-            error_message = (
-                error_message_element[0].strip() if error_message_element else "Error message not found"
-            )
-            raise Exception(error_message)
-
-        if login.status_code != 302:
-            raise Exception("Login failed")
-
-        auth_code = parse_qs(urlparse(login.headers["Location"]).query)["code"][0]
-
-        # Use the auth code to get the token
-        response = requests.post(
-            config.iam_url + "/realms/" + config.iam_realm + "/protocol/openid-connect/token",
-            data={
-                "client_id": config.iam_client,
-                "redirect_uri": SERVICE_URL,
-                "code": auth_code,
-                "grant_type": "authorization_code",
-                "scope": "",
-            },
-        )
-
-        if response.status_code != 200:
-            raise Exception("Failed to get token")
-
-        # instead of storing the access token, we store the offline_access (kind of "refresh") token
-        token = response.json()["refresh_token"]
-
-        print(
-            f"""
-    machine cacheb.dcms.destine.eu
-        login anonymous
-        password {token}
+def output_token(result: TokenResult, output_format: str) -> None:
     """
+    Output the token in the specified format.
+
+    Args:
+        result: TokenResult from authentication.
+        output_format: One of 'json', 'token'.
+    """
+    if output_format == "json":
+        output: Dict[str, Any] = {
+            "access_token": result.access_token,
+            "token_type": "Bearer",
+        }
+        if result.decoded:
+            output["decoded"] = result.decoded
+        print(json.dumps(output, indent=2))
+    elif output_format == "token":
+        print(result.access_token)
+    else:
+        raise ValueError(f"Unknown output format: {output_format}")
+
+
+def main() -> None:
+    """
+    Main entry point for the authentication CLI.
+
+    Parses command-line arguments, loads service configuration,
+    and executes the authentication flow.
+    """
+    parser = argparse.ArgumentParser(
+        description="Get authentication token from DESP IAM.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=f"Available services: {', '.join(ServiceRegistry.list_services())}",
+    )
+
+    parser.add_argument(
+        "--SERVICE",
+        "-s",
+        required=True,
+        type=str,
+        choices=ServiceRegistry.list_services(),
+        help="Service name to authenticate against",
+    )
+
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Enable verbose (DEBUG) logging",
+    )
+
+    parser.add_argument(
+        "--output",
+        "-o",
+        type=str,
+        choices=["json", "token"],
+        default="token",
+        help="Output format: 'json' (full JSON), 'token' (just token)",
+    )
+
+    parser.add_argument(
+        "--netrc",
+        "-n",
+        action="store_true",
+        help="Write/update token in ~/.netrc file for the service host",
+    )
+
+    args = parser.parse_args()
+
+    # Configure logging
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format="%(levelname)s: %(message)s",
+        stream=sys.stderr,
+    )
+
+    try:
+        # Load configuration
+        config, scope, hook = ConfigurationFactory.load_config(args.SERVICE)
+
+        # Initialize and execute authentication
+        auth_service = AuthenticationService(
+            config=config,
+            scope=scope,
+            post_auth_hook=hook,
         )
+        result = auth_service.login(write_netrc=args.netrc)
+
+        # Output the token
+        output_token(result, args.output)
+
+    except AuthenticationError as e:
+        logging.error(str(e))
+        sys.exit(1)
+    except KeyboardInterrupt:
+        logging.error("Authentication cancelled")
+        sys.exit(130)
+    except Exception as e:
+        logging.error(f"Unexpected error: {e}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

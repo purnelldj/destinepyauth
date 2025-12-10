@@ -22,11 +22,12 @@ classifiers = [
 ]
 dependencies = [
     "conflator",
-    "PyJWT",
+    "PyJWT[crypto]",
     "lxml",
     "pydantic",
     "pydantic_settings",
     "requests",
+    "authlib",
 ]
 
 [project.optional-dependencies]
@@ -41,7 +42,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project.scripts]
-auth = "destinepyauth.auth:main"
+destinepyauth = "destinepyauth.auth:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
