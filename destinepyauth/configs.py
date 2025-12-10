@@ -12,15 +12,13 @@ class BaseConfig(ConfigModel):
 
     user: Annotated[
         str | None,
-        Field(description="Your DESP username"),
-        CLIArg("-u", "--user"),
+        Field(description="Your DESP username (via DESPAUTH_USER env var or prompt)"),
         EnvVar("USER"),
     ] = None
 
     password: Annotated[
         str | None,
-        Field(description="Your DESP password"),
-        CLIArg("-p", "--password"),
+        Field(description="Your DESP password (via DESPAUTH_PASSWORD env var or prompt)"),
         EnvVar("PASSWORD"),
     ] = None
 

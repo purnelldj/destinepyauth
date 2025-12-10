@@ -1,6 +1,6 @@
 [project]
 name = "destinepyauth"
-version = "0.1.0"
+version = "0.2.0"
 description = "Harmonized Python script for DestinE authentication."
 authors = [
     { name = "David Purnell", email = "davejpurnell@gmail.com" }
