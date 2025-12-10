@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Each release can have sections: "Added", "Changed", "Deprecated", "Removed", "Fixed" and "Security".
 
+## [0.2.1] - 10-12-2025
+
+# added
+
+- CD to publish to PyPI
+
+# changed
+
+- changed repository visibility to public
+- remove unnecessary dependencies and classifiers from pyproject.toml
+
 ## [0.2.0] - 10-12-2025
 
 ## added
