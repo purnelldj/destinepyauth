@@ -21,11 +21,8 @@ The main entry point is the `get_token()` function:
 ```python
 from destinepyauth import get_token
 
-# Interactive authentication (prompts for credentials)
+# Authenticate (prompts for credentials if not in environment)
 result = get_token("highway")
-
-# With credentials
-result = get_token("highway", username="user@example.com", password="secret")
 
 # Access the token
 token = result.access_token
@@ -77,13 +74,20 @@ ds = xr.open_dataset(
 - `insula` - Insula service
 - `streamer` - Streaming service
 
-## Configuration
+## Credential Handling
 
-Credentials can be provided via:
+When you call `get_token()`, the library will prompt for your credentials with **masked input**
+for both username and password - nothing you type will be visible on screen:
 
-1. Function arguments (`username`, `password`)
-2. Environment variables (`DESPAUTH_USER`, `DESPAUTH_PASSWORD`)
-3. Interactive prompt (if not provided elsewhere)
+```python
+from destinepyauth import get_token
+result = get_token("highway")
+# Username:   (hidden input)
+# Password:   (hidden input)
+```
+
+This ensures credentials cannot be accidentally exposed in terminal logs, screen recordings,
+or shell history.
 
 ## License
 
