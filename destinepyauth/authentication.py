@@ -307,7 +307,7 @@ class AuthenticationService:
         """
         user, password = self._get_credentials()
 
-        logger.info(f"Authenticating on {self.config.iam_url} with user {user}")
+        logger.info(f"Authenticating on {self.config.iam_url}")
 
         # Get login form action, submit credentials and extract auth code
         auth_action_url = self._get_auth_url_action()
