@@ -21,10 +21,7 @@ HIGHWAY_ISSUER = "DESP_IAM_PROD"
 @handle_http_errors("Highway token exchange failed")
 def highway_token_exchange(access_token: str, config: BaseConfig) -> str:
     """
-    Exchange a DESP access token for a HIGHWAY access token.
-
-    Performs OAuth2 token exchange with the Highway identity provider,
-    converting a DESP-issued token to one valid for Highway services.
+    Exchange a DESP access token for a Highway access token.
 
     Args:
         access_token: The DESP access token to exchange.

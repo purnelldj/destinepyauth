@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""
-Command-line interface for DESP authentication.
-
-Usage:
-    auth --SERVICE <service_name> [--output <format>] [--netrc] [--verbose]
-
-Examples:
-    auth -s eden                     # Get Eden token (just token)
-    auth -s highway -o token         # Get Highway token (just token)
-    auth -s cacheb -o json           # Get CacheB token (full JSON)
-    auth -s cacheb --netrc           # Authenticate and write to ~/.netrc
-"""
+"""Command-line interface for DESP authentication."""
 
 import sys
 import argparse

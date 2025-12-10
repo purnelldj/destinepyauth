@@ -22,21 +22,11 @@ def handle_http_errors(error_message: str) -> Callable[[Callable[P, T]], Callabl
     """
     Decorator to handle common HTTP errors with a custom message.
 
-    Catches Timeout, ConnectionError, HTTPError, and RequestException,
-    converting them to AuthenticationError with a descriptive message.
-
     Args:
         error_message: Base error message to prepend to specific error details.
 
     Returns:
         Decorated function that raises AuthenticationError on HTTP failures.
-
-    Example:
-        @handle_http_errors("Failed to fetch data")
-        def fetch_data(url: str) -> dict:
-            response = requests.get(url)
-            response.raise_for_status()
-            return response.json()
     """
 
     def decorator(func: Callable[P, T]) -> Callable[P, T]:

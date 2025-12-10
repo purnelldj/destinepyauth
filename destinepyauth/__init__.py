@@ -1,19 +1,4 @@
-"""
-destinepyauth - Authentication library for DESP (Destination Earth Service Platform).
-
-This module provides a simple API for authenticating against various DESP services.
-
-Quick Start:
-    >>> from destinepyauth import get_token
-    >>> token = get_token("highway")  # Interactive prompt for credentials
-    >>> # Or with credentials
-    >>> token = get_token("highway", username="user@example.com", password="secret")
-
-For services that use .netrc (like CacheB with zarr):
-    >>> from destinepyauth import get_token
-    >>> token = get_token("cacheb", write_netrc=True)
-    >>> # Now zarr/xarray will automatically use credentials from ~/.netrc
-"""
+"""Authentication library for DESP (Destination Earth Service Platform)."""
 
 import logging
 

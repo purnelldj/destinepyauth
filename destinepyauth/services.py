@@ -1,11 +1,4 @@
-"""
-Service registry and configuration factory for destinepyauth.
-
-This module centralizes all service-specific configuration including:
-- OAuth client IDs and redirect URIs
-- Scope requirements
-- Post-authentication hooks (e.g., token exchange)
-"""
+"""Service registry and configuration factory."""
 
 from typing import Dict, Any, Tuple, Callable, Optional
 
@@ -16,12 +9,7 @@ from destinepyauth.hooks import highway_token_exchange
 
 
 class ServiceRegistry:
-    """
-    Registry mapping service names to their configuration defaults, scopes, and hooks.
-
-    All service-specific settings are defined here in one place, making it easy
-    to add new services or modify existing ones.
-    """
+    """Registry mapping service names to their configuration."""
 
     _REGISTRY: Dict[str, Dict[str, Any]] = {
         "cacheb": {
@@ -108,18 +96,11 @@ class ConfigurationFactory:
         """
         Load configuration for a service.
 
-        Uses Conflator to load configuration from environment variables,
-        config files, and CLI arguments. Service-specific defaults are applied
-        for any values not explicitly set by the user.
-
         Args:
             service_name: Name of the service to configure.
 
         Returns:
-            Tuple of (config, scope, post_auth_hook) where:
-            - config: Loaded BaseConfig instance with service defaults applied
-            - scope: OAuth scope string
-            - post_auth_hook: Optional callable for post-auth processing
+            Tuple of (config, scope, post_auth_hook).
         """
         service_info = ServiceRegistry.get_service_info(service_name)
         scope: str = service_info["scope"]

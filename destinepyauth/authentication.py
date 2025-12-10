@@ -1,6 +1,4 @@
-"""
-Main authentication service for DESP OAuth2 authentication flows.
-"""
+"""Authentication service for DESP OAuth2 flows."""
 
 import getpass
 import json
@@ -42,21 +40,7 @@ class TokenResult:
 
 
 class AuthenticationService:
-    """
-    Service for handling DESP OAuth2 authentication flows.
-
-    Supports the full OAuth2 authorization code flow including:
-    - Interactive or configured credential handling
-    - Token verification and decoding
-    - Post-authentication hooks (e.g., token exchange)
-    - Optional .netrc file management
-
-    Attributes:
-        config: Service configuration containing IAM endpoints and credentials.
-        scope: OAuth2 scope string for the authorization request.
-        post_auth_hook: Optional callback for post-authentication processing.
-        netrc_host: Optional hostname for .netrc entry (extracted from redirect_uri if not provided).
-    """
+    """Service for handling DESP OAuth2 authentication flows."""
 
     def __init__(
         self,
@@ -105,6 +89,7 @@ class AuthenticationService:
 
     @handle_http_errors("Failed to get login page")
     def _get_auth_url_action(self) -> str:
+        """Fetch the login page and extract the form action URL."""
         auth_endpoint = f"{self.config.iam_url}/realms/{self.config.iam_realm}/protocol/openid-connect/auth"
         params: Dict[str, str] = {
             "client_id": self.config.iam_client,
@@ -127,6 +112,7 @@ class AuthenticationService:
 
     @handle_http_errors("Failed to submit credentials")
     def _perform_login(self, auth_url_action: str, user: str, passw: str) -> requests.Response:
+        """Submit user credentials to the login form."""
         return self.session.post(
             auth_url_action,
             data={"username": user, "password": passw},
@@ -135,6 +121,7 @@ class AuthenticationService:
         )
 
     def _extract_auth_code(self, login_response: requests.Response) -> str:
+        """Extract the authorization code from the login response redirect."""
         if login_response.status_code == 200:
             try:
                 tree = html.fromstring(login_response.content)
@@ -165,6 +152,7 @@ class AuthenticationService:
 
     @handle_http_errors("Failed to exchange code for token")
     def _exchange_code_for_token(self, auth_code: str) -> Dict[str, Any]:
+        """Exchange the authorization code for access and refresh tokens."""
         token_endpoint = f"{self.config.iam_url}/realms/{self.config.iam_realm}/protocol/openid-connect/token"
 
         response = self.session.post(
@@ -195,19 +183,7 @@ class AuthenticationService:
         return data
 
     def _write_netrc(self, token: str, netrc_path: Optional[Path] = None) -> None:
-        """
-        Write or update credentials in .netrc file.
-
-        Creates the file if it doesn't exist. Updates existing entry for the
-        same host, or appends a new entry if not found.
-
-        Args:
-            token: The access token to store as password.
-            netrc_path: Path to .netrc file. Defaults to ~/.netrc.
-
-        Raises:
-            AuthenticationError: If netrc_host is not configured.
-        """
+        """Write or update credentials in .netrc file."""
         if not self.netrc_host:
             raise AuthenticationError("Cannot write to .netrc: no host configured")
 
@@ -264,8 +240,8 @@ class AuthenticationService:
         Args:
             token: The JWT access token to verify.
 
-        Return:
-            dict: The decoded token.
+        Returns:
+            The decoded token payload, or None if verification fails.
         """
         logger.debug("Verifying token...")
 
@@ -317,14 +293,6 @@ class AuthenticationService:
         """
         Execute the full authentication flow.
 
-        Performs:
-        1. Credential collection (interactive or from config)
-        2. Token exchange using Resource Owner Password Credentials
-        3. Post-auth token processing (if post_auth_hook configured)
-        4. Token verification
-        5. Token output in configured format
-        6. Optionally write to .netrc file
-
         Args:
             write_netrc: If True, write/update the token in ~/.netrc file.
 
@@ -332,7 +300,7 @@ class AuthenticationService:
             TokenResult containing the access token and decoded payload.
 
         Raises:
-            AuthenticationError: If any step of the authentication fails.
+            AuthenticationError: If authentication fails.
         """
         user, password = self._get_credentials()
 
