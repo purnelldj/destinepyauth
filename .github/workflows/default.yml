@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Clone repo
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Set up python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: 3.11
         cache: 'pip'
@@ -21,6 +21,11 @@ jobs:
       run: pip install -e ".[dev]"
     - name: Run tests
       run: pytest
+    - name: Test authentication
+      env:
+        DESPAUTH_USER: ${{ secrets.DESPAUTH_USER }}
+        DESPAUTH_PASSWORD: ${{ secrets.DESPAUTH_PASSWORD }}
+      run: python -c "from destinepyauth import get_token; get_token('highway')"
 
   run_pre-commit:
     name: run_pre-commit
@@ -47,3 +52,14 @@ jobs:
         uses: tarides/changelog-check-action@v2
         with:
           changelog: CHANGELOG.md
+
+  get_token:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
