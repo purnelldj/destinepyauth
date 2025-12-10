@@ -8,11 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Each release can have sections: "Added", "Changed", "Deprecated", "Removed", "Fixed" and "Security".
 
-## pre-release
+## [0.2.0] - 10-12-2025
 
-## changed
+## added
+
+- test authentication in CI
+
+## security
 
 - prompt for credentials ONLY
+- dependabot to check vulenrabilities
+- detect secrets in pre-commit
+
+## removed
+
+- API parameters username, password
 
 ## [0.1.0] - 10-12-2025
 
