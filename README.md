@@ -8,12 +8,6 @@ A Python library for authenticating against DESP (Destination Earth Service Plat
 pip install destinepyauth
 ```
 
-For development:
-
-```bash
-pip install -e ".[dev]"
-```
-
 ## Usage
 
 The main entry point is the `get_token()` function:
