@@ -20,7 +20,7 @@ class TestEndToEndServiceDiscovery:
 
     def test_discover_and_configure_all_services(self):
         """Test discovering and configuring all available services."""
-        services = ServiceRegistry().list_services()
+        services = ServiceRegistry.list_services()
 
         # Verify we can get info for each service
         for service in services:
@@ -100,7 +100,7 @@ class TestEndToEndNetrcWorkflow:
 
             # Step 1: Initialize authentication service
             config = BaseConfig(iam_client="test-client")
-            with patch("destinepyauth.authentication.KeycloakOpenID"):
+            with patch("destinepyauth.authentication.KeycloakOpenID", create=True):
                 auth_service = AuthenticationService(
                     config=config,
                     scope="openid",
@@ -118,7 +118,7 @@ class TestEndToEndNetrcWorkflow:
 
             # Step 4: Add another service's credentials
             config2 = BaseConfig(iam_client="test-client-2")
-            with patch("destinepyauth.authentication.KeycloakOpenID"):
+            with patch("destinepyauth.authentication.KeycloakOpenID", create=True):
                 auth_service2 = AuthenticationService(
                     config=config2,
                     scope="openid",
@@ -145,7 +145,7 @@ class TestEndToEndErrorHandling:
     def test_error_handling_for_netrc_without_host(self):
         """Test error handling when trying to write netrc without a host."""
         config = BaseConfig(iam_client="test-client")
-        with patch("destinepyauth.authentication.KeycloakOpenID"):
+        with patch("destinepyauth.authentication.KeycloakOpenID", create=True):
             auth_service = AuthenticationService(
                 config=config,
                 scope="openid",

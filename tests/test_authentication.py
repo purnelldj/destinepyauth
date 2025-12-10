@@ -24,7 +24,7 @@ class TestAuthenticationServiceNetrc:
             iam_redirect_uri="https://example.com/callback",
         )
 
-        with patch("destinepyauth.authentication.KeycloakOpenID"):
+        with patch("destinepyauth.authentication.KeycloakOpenID", create=True):
             auth_service = AuthenticationService(
                 config=config,
                 scope="openid",
@@ -39,7 +39,7 @@ class TestAuthenticationServiceNetrc:
             iam_redirect_uri="https://example.com/callback",
         )
 
-        with patch("destinepyauth.authentication.KeycloakOpenID"):
+        with patch("destinepyauth.authentication.KeycloakOpenID", create=True):
             auth_service = AuthenticationService(
                 config=config,
                 scope="openid",
@@ -52,7 +52,7 @@ class TestAuthenticationServiceNetrc:
         """Test writing netrc creates a new file with correct permissions."""
         config = BaseConfig(iam_client="test-client")
 
-        with patch("destinepyauth.authentication.KeycloakOpenID"):
+        with patch("destinepyauth.authentication.KeycloakOpenID", create=True):
             with TemporaryDirectory() as tmpdir:
                 netrc_path = Path(tmpdir) / ".netrc"
                 auth_service = AuthenticationService(
@@ -80,7 +80,7 @@ class TestAuthenticationServiceNetrc:
         """Test that writing netrc updates existing entry for same host."""
         config = BaseConfig(iam_client="test-client")
 
-        with patch("destinepyauth.authentication.KeycloakOpenID"):
+        with patch("destinepyauth.authentication.KeycloakOpenID", create=True):
             with TemporaryDirectory() as tmpdir:
                 netrc_path = Path(tmpdir) / ".netrc"
                 # Create initial netrc with entry
@@ -102,7 +102,7 @@ class TestAuthenticationServiceNetrc:
         """Test that writing netrc without host configured raises error."""
         config = BaseConfig(iam_client="test-client")
 
-        with patch("destinepyauth.authentication.KeycloakOpenID"):
+        with patch("destinepyauth.authentication.KeycloakOpenID", create=True):
             auth_service = AuthenticationService(
                 config=config,
                 scope="openid",

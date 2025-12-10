@@ -27,7 +27,6 @@ dependencies = [
     "pydantic",
     "pydantic_settings",
     "requests",
-    "python-keycloak",
     "authlib",
 ]
 

@@ -18,9 +18,6 @@ from lxml.etree import ParserError
 
 from authlib.jose import JsonWebKey, jwt as authlib_jwt
 
-from keycloak import KeycloakOpenID
-from keycloak.exceptions import KeycloakError
-
 from destinepyauth.configs import BaseConfig
 from destinepyauth.exceptions import AuthenticationError, handle_http_errors
 
@@ -49,10 +46,8 @@ class AuthenticationService:
     Service for handling DESP OAuth2 authentication flows.
 
     Supports the full OAuth2 authorization code flow including:
-    - OIDC endpoint discovery via keycloak-python
     - Interactive or configured credential handling
-    - Resource owner password credentials grant
-    - Token verification and decoding (handled by keycloak-python)
+    - Token verification and decoding
     - Post-authentication hooks (e.g., token exchange)
     - Optional .netrc file management
 
@@ -85,16 +80,6 @@ class AuthenticationService:
         self.decoded_token: Optional[Dict[str, Any]] = None
         self.session = requests.Session()
         self.jwks_uri: Optional[str] = None
-
-        # Initialize KeycloakOpenID client
-        try:
-            self.keycloak_client = KeycloakOpenID(
-                server_url=self.config.iam_url,
-                client_id=self.config.iam_client,
-                realm_name=self.config.iam_realm,
-            )
-        except KeycloakError as e:
-            raise AuthenticationError(f"Failed to initialize Keycloak client: {e}")
 
         # Extract netrc host from redirect_uri if not provided
         if netrc_host:
@@ -298,9 +283,6 @@ class AuthenticationService:
     def _verify_and_decode(self, token: str) -> None:
         """
         Verify the token signature and decode the payload.
-
-        Uses the Keycloak client to decode and verify the token.
-        Falls back to unverified decode if verification fails.
 
         Args:
             token: The JWT access token to verify.

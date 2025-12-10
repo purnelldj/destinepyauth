@@ -79,7 +79,7 @@ class TestAuthenticationServiceIntegration:
             iam_realm="test-realm",
         )
 
-        with patch("destinepyauth.authentication.KeycloakOpenID"):
+        with patch("destinepyauth.authentication.KeycloakOpenID", create=True):
             auth_service = AuthenticationService(
                 config=config,
                 scope="openid profile",
@@ -96,7 +96,7 @@ class TestAuthenticationServiceIntegration:
         def mock_hook(token: str, config: BaseConfig) -> str:
             return f"modified_{token}"
 
-        with patch("destinepyauth.authentication.KeycloakOpenID"):
+        with patch("destinepyauth.authentication.KeycloakOpenID", create=True):
             auth_service = AuthenticationService(
                 config=config,
                 scope="openid",
