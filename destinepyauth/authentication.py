@@ -307,70 +307,49 @@ class AuthenticationService:
         """
         logger.debug("Verifying token...")
 
-        # Parse token header and payload without verifying signature
+        # ---- 1. Extract header and payload without verifying ----
         try:
-            parts = token.split(".")
-            if len(parts) < 2:
-                raise AuthenticationError("Invalid token format")
-            header_b64, payload_b64 = parts[0], parts[1]
-            header_b64 += "=" * ((4 - len(header_b64) % 4) % 4)
-            payload_b64 += "=" * ((4 - len(payload_b64) % 4) % 4)
-            unverified_header = json.loads(base64.urlsafe_b64decode(header_b64.encode()))
-            unverified_payload = json.loads(base64.urlsafe_b64decode(payload_b64.encode()))
-            issuer = unverified_payload.get("iss")
-            kid = unverified_header.get("kid")
-            if not kid:
-                raise AuthenticationError("Token missing Key ID (kid)")
+            header_b64, payload_b64, _ = token.split(".")
+            header = json.loads(base64.urlsafe_b64decode(header_b64 + "=="))
+            payload = json.loads(base64.urlsafe_b64decode(payload_b64 + "=="))
         except Exception as e:
-            logger.error(f"Failed to parse token header/payload: {e}")
-            raise AuthenticationError(f"Invalid token: {e}")
+            raise ValueError(f"Invalid token format: {e}")
 
-        # Ensure realm JWKS known
-        if not self.jwks_uri:
-            try:
-                self._discover_endpoints()
-            except Exception:
-                pass
+        issuer = payload.get("iss")
+        kid = header.get("kid")
 
-        # Discover issuer JWKS if issuer looks different
-        target_jwks_uri = self.jwks_uri
-        if issuer:
-            try:
-                issuer_domain = urlparse(issuer).netloc
-                config_domain = urlparse(self.config.iam_url).netloc
-                if issuer_domain != config_domain or (self.config.iam_realm not in issuer):
-                    resp = requests.get(f"{issuer}/.well-known/openid-configuration", timeout=5)
-                    resp.raise_for_status()
-                    target_jwks_uri = resp.json().get("jwks_uri")
-            except Exception as e:
-                logger.warning(f"Failed to discover issuer config: {e}")
+        if not issuer:
+            raise ValueError("Token has no issuer (iss)")
+        if not kid:
+            raise ValueError("Token has no key ID (kid)")
 
-        if not target_jwks_uri:
-            logger.warning("No JWKS URI available; returning unverified payload")
-            self.decoded_token = unverified_payload
-            return
+        # ---- 2. Discover issuer JWKS URI ----
+        # This automatically handles Keycloak, Auth0, etc.
+        oidc_config = requests.get(f"{issuer}/.well-known/openid-configuration").json()
+        jwks_uri = oidc_config["jwks_uri"]
 
-        jwks_response = requests.get(target_jwks_uri, timeout=5)
-        jwks_response.raise_for_status()
-        jwks_json = jwks_response.json()
+        # ---- 3. Fetch JWKS ----
+        jwks = JsonWebKey.import_key_set(requests.get(jwks_uri).json())
 
-        # Verify signature using authlib (imported as required in pyproject)
+        # ---- 4. Verify the token signature and claims ----
         try:
-            key_set = JsonWebKey.import_key_set(jwks_json)
-            decoded = authlib_jwt.decode(token, key_set)
-            try:
-                claims = dict(decoded)
-            except Exception:
-                claims = decoded
+            claims = authlib_jwt.decode(
+                token,
+                key=jwks,
+                claims_options={
+                    # Disable audience validation if needed
+                    "aud": {"essential": False},
+                },
+            )
+            # Standard claims validation (exp, nbf, iat, iss)
+            claims.validate()
+            claims = dict(claims)
             logger.info("Token verified successfully")
             logger.debug(json.dumps(claims, indent=2))
             self.decoded_token = claims
-            return
         except Exception as e:
             logger.error(f"Token verification failed: {e}")
-            # fallback to returning unverified payload to preserve behavior
-            self.decoded_token = unverified_payload
-            return
+        return
 
     def login(self, write_netrc: bool = False) -> TokenResult:
         """
