@@ -80,22 +80,9 @@ class AuthenticationService:
         self.decoded_token: Optional[Dict[str, Any]] = None
         self.session = requests.Session()
         self.jwks_uri: Optional[str] = None
-
-        # Extract netrc host from redirect_uri if not provided
-        if netrc_host:
-            self.netrc_host = netrc_host
-        elif config.iam_redirect_uri:
+        self.netrc_host = netrc_host
+        if not self.netrc_host and config.iam_redirect_uri:
             self.netrc_host = urlparse(config.iam_redirect_uri).netloc
-        else:
-            self.netrc_host = None
-
-        # Extract netrc host from redirect_uri if not provided
-        if netrc_host:
-            self.netrc_host = netrc_host
-        elif config.iam_redirect_uri:
-            self.netrc_host = urlparse(config.iam_redirect_uri).netloc
-        else:
-            self.netrc_host = None
 
         logger.debug("Configuration loaded:")
         logger.debug(f"  IAM URL: {self.config.iam_url}")
@@ -270,7 +257,7 @@ class AuthenticationService:
 
         logger.info(f"Updated .netrc entry for {self.netrc_host}")
 
-    def _verify_and_decode(self, token: str) -> Dict | None:
+    def _verify_and_decode(self, token: str) -> Optional[Dict[str, Any]]:
         """
         Verify the token signature and decode the payload.
 
