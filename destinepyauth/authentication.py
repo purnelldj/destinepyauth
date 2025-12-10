@@ -288,15 +288,15 @@ class AuthenticationService:
             header = json.loads(base64.urlsafe_b64decode(header_b64 + "=="))
             payload = json.loads(base64.urlsafe_b64decode(payload_b64 + "=="))
         except Exception as e:
-            raise ValueError(f"Invalid token format: {e}")
+            raise AuthenticationError(f"Invalid token: failed to parse header/payload: {e}")
 
         issuer = payload.get("iss")
         kid = header.get("kid")
 
         if not issuer:
-            raise ValueError("Token has no issuer (iss)")
+            raise AuthenticationError("Invalid token: missing issuer (iss)")
         if not kid:
-            raise ValueError("Token has no key ID (kid)")
+            raise AuthenticationError("Invalid token: missing key ID (kid)")
 
         # ---- 2. Discover issuer JWKS URI ----
         # This automatically handles Keycloak, Auth0, etc.
