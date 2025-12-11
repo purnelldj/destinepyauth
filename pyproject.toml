@@ -1,6 +1,6 @@
 [project]
 name = "destinepyauth"
-version = "0.2.1"
+dynamic = ["version"]
 description = "Harmonized Python script for DestinE authentication."
 authors = [
     { name = "David Purnell", email = "davejpurnell@gmail.com" }
@@ -30,8 +30,12 @@ dev = [
 ]
 
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "setuptools-scm>=8.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+version_scheme = "post-release"
+local_scheme = "no-local-version"
 
 [project.scripts]
 destinepyauth = "destinepyauth.auth:main"
