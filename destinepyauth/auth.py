@@ -79,6 +79,13 @@ def main() -> None:
         help="Write/update token in ~/.netrc file for the service host",
     )
 
+    parser.add_argument(
+        "--print",
+        "-p",
+        action="store_true",
+        help="Print the token output",
+    )
+
     args = parser.parse_args()
 
     # Configure logging
@@ -102,7 +109,8 @@ def main() -> None:
         result = auth_service.login(write_netrc=args.netrc)
 
         # Output the token
-        output_token(result, args.output)
+        if args.print:
+            output_token(result, args.output)
 
     except AuthenticationError as e:
         logging.error(str(e))
