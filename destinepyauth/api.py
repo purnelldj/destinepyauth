@@ -1,6 +1,7 @@
 """High-level API for DESP authentication."""
 
 import logging
+from typing import Optional
 
 from destinepyauth.authentication import AuthenticationService, TokenResult
 from destinepyauth.services import ConfigurationFactory
@@ -10,7 +11,7 @@ def get_token(
     service: str,
     write_netrc: bool = False,
     verbose: bool = False,
-) -> TokenResult:
+) -> Optional[TokenResult]:
     """
     Authenticate and get an access token for a DESP service.
 
@@ -24,7 +25,8 @@ def get_token(
         verbose: If True, enable DEBUG logging.
 
     Returns:
-        TokenResult containing access_token and decoded payload.
+        TokenResult containing the access token and decoded payload.
+        Returns None if write_netrc=True to prevent token exposure in output.
 
     Raises:
         AuthenticationError: If authentication fails.
@@ -45,4 +47,7 @@ def get_token(
         post_auth_hook=hook,
     )
 
-    return auth_service.login(write_netrc=write_netrc)
+    result = auth_service.login(write_netrc=write_netrc)
+
+    if not write_netrc:
+        return result
